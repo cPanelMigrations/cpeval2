@@ -1371,13 +1371,22 @@ sub print_prefixed_php_information {
 }
 
 sub cpanel_eula_accepted_check {
-    if ( $is_cpanel == 1 ) {
-        if ( !-e '/etc/.whostmgrft' ) {
-            print $prefix . 'EULA:' . '0';
-        }
-        else {
-            print $prefix . 'EULA:' . '1';
-        }
+    return if ( $is_cpanel != 1 );
+
+    my $eula_accepted = 0;
+    my @dir_contents;
+
+    if ( -d '/var/cpanel/activate' ) {
+        opendir( my $dir_fh, '/var/cpanel/activate' ) or return;
+        @dir_contents = grep { /EULACPWHM/ } readdir $dir_fh;
+        closedir $dir_fh;
+    }
+
+    if ( !@dir_contents ) {
+        print $prefix . 'EULA:' . '0';
+    }
+    else {
+        print $prefix . 'EULA:' . '1';
     }
 }
 
