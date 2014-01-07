@@ -1756,7 +1756,7 @@ sub print_parsed_php_info {
                 $print_message = 1; 
                 $addendum  = "The versions of PHP do not match. This is ok, but some sites may not be compatible with different versions of PHP.\n\n";
                 $addendum .= "cPanel supports PHP $supported_php_versions at this time.\n\n";
-                $addendum .= "For maximum compatibility, I would recommend upgrading PHP 5.4 on the cPanel server. This is not required, however.\n\n";
+                $addendum .= "For maximum compatibility, I would recommend upgrading PHP $src_php on the cPanel server. This is not required, however.\n\n";
                 $addendum .= "Would you like us to upgrade PHP on the cPanel server to ${src_php}?\n\n";
                 $addendum .= "[ ] YES   [ ] NO\n";
             }
