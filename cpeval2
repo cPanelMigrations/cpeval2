@@ -24,6 +24,8 @@ use strict;
 use warnings;
 use IPC::Open3;
 
+my $version = '1.0';
+
 if ( @ARGV > 1 ) { 
     print "  Usage is one of the following:\n\n";
     print "[root\@host ~]# $0\n";
@@ -65,35 +67,24 @@ sub print_news_cpanel {
 }
 
 sub print_news_plesk {
-    print q{   !! PLESK BLOCKERS !!
-1) FB 81265 - unpkgacct has the shebang of /usr/local/cpanel/3rdparty/bin/perl on a third-party panel during a migration
-   WORKAROUND(S):  A) Migrate manually, or B) See symlink workaround in case
-----------------------------------------
-    };
-
-    sleep 3;
+#    print q{   !! PLESK BLOCKERS !!
+#    };
+#
+#    sleep 3;
 }
 
 sub print_news_ensim {
-    print q{   !! ENSIM BLOCKERS !!
-1) FB 81265 - unpkgacct has the shebang of /usr/local/cpanel/3rdparty/bin/perl on a third-party panel during a migration
-   WORKAROUND(S):  A) Migrate manually, or B) See symlink workaround in case
-----------------------------------------
-
-    };
-
-    sleep 3;
+#    print q{   !! ENSIM BLOCKERS !!
+#    };
+#
+#    sleep 3;
 }
 
 sub print_news_da {
-    print q{   !! DA BLOCKERS !!
-1) FB 81265 - unpkgacct has the shebang of /usr/local/cpanel/3rdparty/bin/perl on a third-party panel during a migration
-   WORKAROUND(S):  A) Migrate manually, or B) See symlink workaround in case
-----------------------------------------
-
-    };
-
-    sleep 3;
+#    print q{   !! DA BLOCKERS !!
+#    };
+#
+#    sleep 3;
 }
 
 
@@ -122,7 +113,7 @@ if ( !$infile ) {
     print_mysql_db_count();
     print_postgres_db_count();
     check_destination_var_usage();
-    print_bad_usernames();
+#    print_bad_usernames();
     print_duplicate_usernames();
     print_custom_apache_modules();
     print_custom_php_modules();
@@ -143,6 +134,8 @@ if ( !$infile ) {
     print_prefixed_reseller_username_conflicts();
     print_prefixed_php_information();
     cpanel_eula_accepted_check();
+    print_mysql_username_conflict_info();
+
 }
 ## parse output file; this prints info we can just copy/paste into the ticket
 else {
@@ -1091,6 +1084,7 @@ sub print_custom_php_modules {
     }
 }
 
+=cut
 sub print_bad_usernames {
     return if $is_cpanel == 1;
 
@@ -1122,6 +1116,7 @@ sub print_bad_usernames {
 
     print "\nBad Usernames:\n" . "$result\n";
 }
+=cut
 
 sub print_duplicate_usernames {
     return if $is_ensim == 0;
@@ -1390,6 +1385,58 @@ sub cpanel_eula_accepted_check {
     }
 }
 
+sub print_mysql_username_conflict_info {
+    return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
+
+    my ( $user, $domain );
+    my %trueuserdomains;
+    my %mysql_layout;
+    my @seen;
+
+    open my $fh, '<', '/etc/trueuserdomains' or die $!;
+    while (<$fh>) {
+        chomp;
+        ( $domain, $user ) = split /:/, $_;
+        $user =~ s/\s+//g;
+        $trueuserdomains{$domain} = $user;
+    }
+    close $fh;
+
+    my $domain_ids_and_names = `mysql -BN psa -e 'select id,name from domains order by id'`;
+    my %domain_ids_and_names = split /\s/, $domain_ids_and_names;
+
+    while ( my ( $domain_id, $trueuserdomain ) = each ( %domain_ids_and_names ) ) {
+        my @dbusers = `mysql -BN psa -e '
+                   select
+                        db_users.login
+                   from
+                        db_users
+                   inner join data_bases on data_bases.id = db_users.db_id
+                   inner join domains on data_bases.dom_id = domains.id
+                   where
+                       data_bases.type = "mysql"
+                       and domains.id = $domain_id'`;
+        next if !@dbusers;
+        $mysql_layout{$trueuserdomain}{$trueuserdomains{$trueuserdomain}} = [ @dbusers ];
+    }
+
+    for my $sysuser ( values %trueuserdomains ) {
+        next if grep { /^$sysuser$/ } @seen;
+        for my $domain ( keys %mysql_layout ) {
+            next if ( exists $mysql_layout{$domain}{$sysuser} ); # Plesk user alice can have a mysql user of the same name
+            if ( grep { /^$sysuser$/ } @{ $mysql_layout{$domain}{$trueuserdomains{$domain}} } ) {
+                for my $d ( keys %trueuserdomains ) {
+                    if ( $trueuserdomains{$d} eq $sysuser ) {
+                        print $prefix . 'MYSQL_CONFLICT:' . "${domain}:${sysuser}:${d}\n";
+                        push @seen, $sysuser; # avoid checking the same user twice
+                        last;
+                    }
+                }
+            }
+        }
+    }
+}
+
 sub print_plesk_duplicate_email_users {
     return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
 
@@ -1470,12 +1517,14 @@ sub print_reseller_username_conflicts {
         }
     }
 
+=cut
     if (@plesk_reseller_username_conflicts) {
         print "\n\nReseller username conflicts:\n";
         for my $reseller (@plesk_reseller_username_conflicts) {
             print " $reseller\n";
         }
     }
+=cut
 }
 
 sub parse_output_file {
@@ -1501,6 +1550,8 @@ sub parse_output_file {
     my ( $src_phpini_post_max_size, $dst_phpini_post_max_size );
     my ( $src_phpini_upload_max_filesize, $dst_phpini_upload_max_filesize );
     my ( $src_phpini_date_timezone, $dst_phpini_date_timezone );
+    my ( @mysql_username_conflicts );
+
 
     open my $file_fh, '<', $file or die "Could not open $file: $!\n";
     while ( <$file_fh> ) {
@@ -1633,6 +1684,11 @@ sub parse_output_file {
         if ( m{ \A d:EULA:(\d) }xms ) {
             $eula_accepted = $1;
         }
+
+        ## mysql username conflict check
+        if ( m{ \A $panel_regex:MYSQL_CONFLICT:(.*)\z }xms ) {
+            push @mysql_username_conflicts, $1;
+        }
     }
 
     close $file_fh;
@@ -1661,6 +1717,8 @@ sub parse_output_file {
                                $src_phpini_upload_max_filesize, $dst_phpini_upload_max_filesize,
                                $src_phpini_date_timezone, $dst_phpini_date_timezone
     );
+    print_parsed_mysql_username_conflicts( @mysql_username_conflicts ) if @mysql_username_conflicts;
+
 
 }
 
@@ -2029,7 +2087,7 @@ sub print_parsed_phpini_items {
     }
 
     if ($message) {
-        print_header('php.ini settings');
+        print_header('php.ini Settings');
         print "We have checked several of the most commonly customized configuration options in php.ini and found some differences.\n\n";
         print "To ensure that PHP applications function properly on the cPanel server, it is recommended that the settings be the same on both servers.\n\n";
         print "The differences that we found are listed below:\n\n";
@@ -2289,4 +2347,21 @@ that would not be copied. Things to keep in mind are:
             print "$key\t-> $ftp_accounts{$key}\n";
         }
     }
+}
+
+
+sub print_parsed_mysql_username_conflicts {
+    my @mysql_username_conflicts = @_;
+    my $count = 1;
+    print_header('mysql Username Conflicts');
+    print "\nmysql username conflicts have been found. To fix, please rename the user(s) specified below:\n\n";
+
+    for my $conflict (@mysql_username_conflicts) {
+        my ( $domain1, $user, $domain2 ) = split /:/, $conflict;
+        # subscription1.test has mysql user "example", but there is a Plesk account named example, owned by example.com
+            print "[CONFLICT $count] $domain1 has mysql user \"$user\" (to fix, rename ${domain2}'s \"$user\")\n";
+            $count++;
+    }
+
+    print_username_change_info();
 }
