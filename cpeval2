@@ -1038,7 +1038,7 @@ sub print_custom_php_modules {
         zlib
     );
 
-    # Modules that EasyApache does not support or are core
+    # Modules that EasyApache does not support
     my @ignore = qw(
         sysvmsg
         sysvsem
