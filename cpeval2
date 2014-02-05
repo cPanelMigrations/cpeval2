@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.1';
+my $version = '1.2';
 
 if ( @ARGV > 1 ) { 
     print "  Usage is one of the following:\n\n";
@@ -2155,6 +2155,11 @@ unless ( $infile ) {
 
     if ( $is_plesk == 1 ) {
         print "  * Plesk stores users' data under /var [ /var/www/vhosts/\${DOMAIN}/ ] [ /var/qmail/mailnames/\${DOMAIN}/ ] [ /var/lib/mysql ]\n";
+        if ( $^O =~ /freebsd/i ) {
+            print "  * commonly, customers with FreeBSD will have different locations for their services\n" .
+                  "  * if pkgacct fails to find the locations of the user's data, you will need to get the locations of the data from /etc/psa/psa.conf, then create directories and symlinks so pkgacct can package correctly\n" .
+                  "  * variables to grep for in the psa.conf are HTTPD_VHOSTS_D, QMAIL_MAILNAMES_D, MYSQL_VAR_D, PGSQL_DATA_D\n";
+        }
     }
 }
 
