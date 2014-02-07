@@ -78,7 +78,7 @@ sub print_news_ensim {
 
 Case 72981: Filed 7 months ago.
 
-Use Keith's workaround found in the case (from the "wget" to the "chattr" in the FIRST block of commands (9 commands)
+Use Keith's workaround found in the case (from the "wget" to the "chattr" in the FIRST block of commands (9 commands))
     };
 
     sleep 3;
