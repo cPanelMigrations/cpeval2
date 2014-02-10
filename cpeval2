@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.4';
+my $version = '1.5';
 
 if ( @ARGV > 1 ) { 
     print "  Usage is one of the following:\n\n";
@@ -33,7 +33,6 @@ if ( @ARGV > 1 ) {
     exit;
 }
 
-my $supported_php_versions = '5.2, 5.3, 5.4, and 5.5';
 my $panel_regex = 's:(?:Plesk(?:8|9|10|10SMB|11)|Ensim|DirectAdmin)';
 
 my $infile = shift;
@@ -1725,9 +1724,14 @@ complete the initial setup that follows.
 }
 
 sub print_parsed_php_info {
-## this subroutine will ideally have vars at the top which define the min and max PHP versions
-## so that the code below doesn't need to be modified in multiple places in the future. one day...
     my ( $src_php, $dst_php ) = @_;
+
+    my $supported_php_versions = '5.3, 5.4, and 5.5';
+    my @php5_minor_available = qw( 3 4 5 );
+
+    my $min_php_minor_supported = shift @php5_minor_available;
+    my $max_php_minor_supported = pop   @php5_minor_available;
+
     my ( $src_php_major, $src_php_minor );
     my ( $dst_php_major, $dst_php_minor );
 
@@ -1742,75 +1746,25 @@ sub print_parsed_php_info {
     my $print_message = 0;
     my $addendum;
 
-    ## we only care if the major and minor versions don't match
     return if ( $src_php eq $dst_php );
 
-    ## we don't support PHP 6 yet
-    if ( $src_php_major == 6 ) {
+    ## we only support PHP 5 at this time
+    if ( $src_php_major != 5 ) {
         $print_message = 1;
         $addendum = "cPanel only supports PHP 5 at this time. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.\n";
     }
-    ## we no longer support PHP 4 (there is a custom opt mod, but I'm not about to recommend anyone actually use PHP 4)
-    elsif ( $src_php_major == 4 ) {
-        ## if source is PHP 4, recommend using the lowest supported version on cPanel (PHP 5.2, currently)
-        if ( $dst_php_major == 5 and $dst_php_minor > 2 ) {
-            $print_message = 1;
-            $addendum  = "cPanel does not support PHP 4.\n\n";
-            $addendum .= "For maximum compatibility, I would recommend downgrading to PHP 5.2 on the cPanel server. This is not required, however.\n\n";
-            $addendum .= "Would you like us to downgrade PHP on the cPanel server to 5.2?\n\n";
-            $addendum .= "[ ] YES   [ ] NO\n";
-        }
+    ## if cPanel isn't using PHP 5 for some reason
+    elsif ( $dst_php_major != 5 ) {
+        $print_message = 1;
+        $addendum = "cPanel only supports PHP 5 at this time. If you have elected to have us recompile PHP to add support for certain PHP modules, we will be unable to do so unless we can install PHP 5. We currently support PHP $supported_php_versions.\n\n";
+        $addendum .= "Would you like us to install PHP 5 on the cPanel server? If yes, which version? If no version of specified, we will compile the latest available.\n\n";
+        $addendum .= "[ ] YES   [ ] NO\n";
     }
-    ## if source and dest are both PHP 5
-    elsif ( $src_php_major == 5 and $dst_php_major == 5 ) {
-        ## if source PHP 5 is lower than dest PHP 5
-        if ( $src_php_minor <= 2  and $dst_php_minor > 2 ) {
+    else {
+        ## if cPanel doesn't offer the same version as the source, let them know
+        if ( !grep { /$src_php_minor/ } @php5_minor_available ) {
             $print_message = 1;
-            $addendum  = "The versions of PHP do not match. This is ok, but some sites may not be compatible with different versions of PHP.\n\n";
-            $addendum .= "cPanel supports PHP $supported_php_versions at this time.\n\n";
-            $addendum .= "For maximum compatibility, I would recommend downgrading to PHP 5.2 on the cPanel server. This is not required, however.\n\n";
-            $addendum .= "Would you like us to downgrade PHP on the cPanel server to 5.2?\n\n";
-            $addendum .= "[ ] YES   [ ] NO\n";
-        }
-        ## cPanel supports PHP 5.5, but no higher
-        elsif ( $src_php_minor > 5 and $dst_php_minor < 5 ) {
-            $print_message = 1;
-            $addendum  = "The $src_panel_noversion server is using PHP ${src_php}.\n\n";
-            $addendum .= "cPanel currently supports PHP ${supported_php_versions}.\n\n";
-            $addendum .= "For maximum compatibility, I would recommend ugrading to PHP 5.5 on the cPanel server. This is not required, however.\n\n";
-            $addendum .= "Would you like us to upgrade PHP on the cPanel server to 5.5?\n\n";
-            $addendum .= "[ ] YES   [ ] NO\n";
-        }
-        ## source exceeds max supported PHP version
-        elsif ( $src_php_minor > 5 and $dst_php_minor == 5 ) {
-            $print_message = 1;
-            $addendum = "cPanel only supports up to PHP 5.5 at this time. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.\n";
-        }
-        elsif ( $src_php_minor == 4 and $dst_php_minor > 4 ) {
-            $print_message = 1;
-            $addendum  = "The versions of PHP do not match. This is ok, but some sites may not be compatible with different versions of PHP.\n\n";
-            $addendum .= "cPanel supports PHP $supported_php_versions at this time.\n\n";
-            $addendum .= "For maximum compatibility, I would recommend downgrading to PHP 5.4 on the cPanel server. This is not required, however.\n\n";
-            $addendum .= "Would you like us to downgrade PHP on the cPanel server to ${src_php}?\n\n";
-            $addendum .= "[ ] YES   [ ] NO\n";
-        }
-        elsif ( $src_php_minor == 3 and $dst_php_minor > 3 ) {
-            $print_message = 1;
-            $addendum  = "The versions of PHP do not match. This is ok, but some sites may not be compatible with different versions of PHP.\n\n";
-            $addendum .= "cPanel supports PHP $supported_php_versions at this time.\n\n";
-            $addendum .= "For maximum compatibility, I would recommend downgrading to PHP 5.3 on the cPanel server. This is not required, however.\n\n";
-            $addendum .= "Would you like us to downgrade PHP on the cPanel server to ${src_php}?\n\n";
-            $addendum .= "[ ] YES   [ ] NO\n";
-        }
-        elsif ( $dst_php < $src_php ) {
-            if ( $dst_php_major == 5 and $dst_php_minor < 4 ) {
-                $print_message = 1; 
-                $addendum  = "The versions of PHP do not match. This is ok, but some sites may not be compatible with different versions of PHP.\n\n";
-                $addendum .= "cPanel supports PHP $supported_php_versions at this time.\n\n";
-                $addendum .= "For maximum compatibility, I would recommend upgrading PHP $src_php on the cPanel server. This is not required, however.\n\n";
-                $addendum .= "Would you like us to upgrade PHP on the cPanel server to ${src_php}?\n\n";
-                $addendum .= "[ ] YES   [ ] NO\n";
-            }
+            $addendum = "The versions of PHP do not match. cPanel currently supports PHP $supported_php_versions. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.\n";
         }
     }
 
