@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.5';
+my $version = '1.6';
 
 if ( @ARGV > 1 ) { 
     print "  Usage is one of the following:\n\n";
@@ -1749,23 +1749,28 @@ sub print_parsed_php_info {
     return if ( $src_php eq $dst_php );
 
     ## we only support PHP 5 at this time
-    if ( $src_php_major != 5 ) {
+
+    ## if src php is higher than 5
+    if ( $src_php_major > 5 ) {
         $print_message = 1;
         $addendum = "cPanel only supports PHP 5 at this time. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.\n";
     }
+    ## if src php is lower than 5
+    elsif ( $src_php_major < 5 or ( $src_php_major == 5 and $src_php_minor < $min_php_minor_supported )) {
+        $print_message = 1;
+        $addendum = "The versions of PHP do not match. cPanel currently supports PHP 5.3, 5.4, and 5.5. Unfortunately, due to the end-of-life PHP version on the $src_panel_noversion server[1], there may be issues with your sites displaying correctly on the cPanel server. Many features available in PHP <= 5.2 were deprecated in PHP 5.3 and later removed in PHP 5.4 entirely[2].\n\n";
+        $addendum .= "We can definitely move forward with the migration. However, we would be unable to determine if any of your PHP driven websites may be incompatible with 5.3 or higher. As such it’s highly recommended that any PHP based websites are updated (if necessary) to be compatible with versions of PHP beyond 5.2.\n\n";
+        $addendum .= "Additionally, after the migration, we may not be able to provide assistance to issues related to websites which require PHP <= 5.2.\n\n";
+        $addendum .= "[1] http://php.net/eol.php\n";
+        $addendum .= "[2] http://www.php.net/manual/en/migration53.deprecated.php\n";
+    }
+
     ## if cPanel isn't using PHP 5 for some reason
-    elsif ( $dst_php_major != 5 ) {
+    if ( $dst_php_major != 5 ) {
         $print_message = 1;
         $addendum = "cPanel only supports PHP 5 at this time. If you have elected to have us recompile PHP to add support for certain PHP modules, we will be unable to do so unless we can install PHP 5. We currently support PHP $supported_php_versions.\n\n";
         $addendum .= "Would you like us to install PHP 5 on the cPanel server? If yes, which version? If no version of specified, we will compile the latest available.\n\n";
         $addendum .= "[ ] YES   [ ] NO\n";
-    }
-    else {
-        ## if cPanel doesn't offer the same version as the source, let them know
-        if ( !grep { /$src_php_minor/ } @php5_minor_available ) {
-            $print_message = 1;
-            $addendum = "The versions of PHP do not match. cPanel currently supports PHP $supported_php_versions. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.\n";
-        }
     }
 
     if ( $print_message == 1 ) {
