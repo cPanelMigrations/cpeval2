@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.6';
+my $version = '1.7';
 
 if ( @ARGV > 1 ) { 
     print "  Usage is one of the following:\n\n";
@@ -1396,6 +1396,7 @@ sub print_mysql_username_conflict_info {
     my %domain_ids_and_names = split /\s/, $domain_ids_and_names;
 
     while ( my ( $domain_id, $trueuserdomain ) = each ( %domain_ids_and_names ) ) {
+        next if not exists $trueuserdomains{$trueuserdomain};
         my @dbusers = `mysql -BN psa -e '
                    select
                         db_users.login
