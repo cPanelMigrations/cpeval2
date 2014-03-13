@@ -24,18 +24,23 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.7';
+my $version = '1.8';
 
-if ( @ARGV > 1 ) { 
+if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
     print "[root\@host ~]# $0\n";
-    print "[root\@host ~]# $0 [infile]\n";
+    print "[root\@host ~]# $0 <infile>\n";
+    print "[root\@host ~]# $0 <infile> --es\n";
     exit;
 }
 
 my $panel_regex = 's:(?:Plesk(?:8|9|10|10SMB|11)|Ensim|DirectAdmin)';
 
-my $infile = shift;
+my $es = 0;                 # for use with an input file so that we can print ES back to the customer
+if ( $ARGV[1] and $ARGV[1] eq '--es' ) { $es = 1; }
+
+my $infile = shift;         # input file which contains the output from standalone mode for src and dst servers
+
 my $prefix;                 # d: or s:Plesk9 or s:DirectAdmin, etc.
 my $apache_bin;
 my $python_bin;
@@ -56,6 +61,8 @@ my $has_pgsql = 0;
 my $eula_accepted = 0;
 
 my ( $plesk_major_version, $plesk_minor_version );
+
+my @badusers;               # if mysql username conflicts are detected, skip any bad users since they need renaming anyway
 
 get_control_panel_and_set_prefix();
 check_for_empty_trueuserdomains();
@@ -116,7 +123,6 @@ if ( !$infile ) {
     print_mysql_db_count();
     print_postgres_db_count();
     check_destination_var_usage();
-#    print_bad_usernames();
     print_duplicate_usernames();
     print_custom_apache_modules();
     print_custom_php_modules();
@@ -129,7 +135,7 @@ if ( !$infile ) {
 
     print_prefixed_php_info();
     print_prefixed_mysql_info();
-    print_prefixed_bad_username_info();
+    print_prefixed_bad_username_info(); # this sub MUST come before print_mysql_username_conflict_info();
     print_prefixed_dedicated_ip_addr_info();
     print_prefixed_hosting_types();
     print_prefixed_tomcat_info();
@@ -138,6 +144,7 @@ if ( !$infile ) {
     print_prefixed_php_information();
     cpanel_eula_accepted_check();
     print_mysql_username_conflict_info();
+    print_prefixed_openfileslimit();
 
 }
 ## parse output file; this prints info we can just copy/paste into the ticket
@@ -1074,40 +1081,6 @@ sub print_custom_php_modules {
     }
 }
 
-=cut
-sub print_bad_usernames {
-    return if $is_cpanel == 1;
-
-    my $result;
-    if ( -f "/etc/trueuserdomains" ) { 
-        my $userdoms;
-        open( FILE, "/etc/trueuserdomains" );
-        while (<FILE>) {
-            $userdoms .= $_;
-        }
-        close(FILE);
-        my @list = split( "\n", $userdoms );
-        my @badlist = grep { /[^:]: (.*[\-\._]|test|[0-9])/ } @list;
-
-        return if !@badlist;
-
-        if (@badlist) {
-            foreach (@badlist) {
-                $result .= " $_\n";
-            }
-        }
-        else {
-            $result = " -None-";
-        }
-    }   
-    else {
-        die("/etc/trueuserdomains missing!");
-    }   
-
-    print "\nBad Usernames:\n" . "$result\n";
-}
-=cut
-
 sub print_duplicate_usernames {
     return if $is_ensim == 0;
 
@@ -1223,6 +1196,7 @@ sub print_prefixed_bad_username_info {
                 chomp;
                 if ( m{ [^:]: \s (.*[\-\._]|test|[0-9]|[A-Z]) }xms ) {
                     print $prefix . 'BADUSER:' . "$_\n";
+                    push @badusers, $_;
                 }
             }
             close $userdomains_fh;
@@ -1368,10 +1342,10 @@ sub cpanel_eula_accepted_check {
     }
 
     if ( !@dir_contents ) {
-        print $prefix . 'EULA:' . '0';
+        print $prefix . 'EULA:' . '0' . "\n";
     }
     else {
-        print $prefix . 'EULA:' . '1';
+        print $prefix . 'EULA:' . '1' . "\n";
     }
 }
 
@@ -1413,6 +1387,7 @@ sub print_mysql_username_conflict_info {
 
     for my $sysuser ( values %trueuserdomains ) {
         next if grep { /^$sysuser$/ } @seen;
+        next if grep { /^$sysuser$/ } @badusers; # bad usernames must be renamed anyway
         for my $domain ( keys %mysql_layout ) {
             next if ( exists $mysql_layout{$domain}{$sysuser} ); # Plesk user alice can have a mysql user of the same name
             if ( grep { /^$sysuser$/ } @{ $mysql_layout{$domain}{$trueuserdomains{$domain}} } ) {
@@ -1426,6 +1401,15 @@ sub print_mysql_username_conflict_info {
             }
         }
     }
+}
+
+sub print_prefixed_openfileslimit {
+    return if ( $is_cpanel == 0 );
+
+    my $open_files_limit = `mysqladmin var | grep open_files_limit | awk '{print \$4}'`;
+    chomp $open_files_limit;
+
+    print $prefix . 'MYSQL_OPEN_FILES_LIMIT:' . $open_files_limit . "\n";
 }
 
 sub print_plesk_duplicate_email_users {
@@ -1507,15 +1491,6 @@ sub print_reseller_username_conflicts {
             }
         }
     }
-
-=cut
-    if (@plesk_reseller_username_conflicts) {
-        print "\n\nReseller username conflicts:\n";
-        for my $reseller (@plesk_reseller_username_conflicts) {
-            print " $reseller\n";
-        }
-    }
-=cut
 }
 
 sub parse_output_file {
@@ -1542,7 +1517,7 @@ sub parse_output_file {
     my ( $src_phpini_upload_max_filesize, $dst_phpini_upload_max_filesize );
     my ( $src_phpini_date_timezone, $dst_phpini_date_timezone );
     my ( @mysql_username_conflicts );
-
+    my $open_files_limit;
 
     open my $file_fh, '<', $file or die "Could not open $file: $!\n";
     while ( <$file_fh> ) {
@@ -1680,6 +1655,11 @@ sub parse_output_file {
         if ( m{ \A $panel_regex:MYSQL_CONFLICT:(.*)\z }xms ) {
             push @mysql_username_conflicts, $1;
         }
+
+        ## mysql open_files_limit check
+        if ( m{ \A d:MYSQL_OPEN_FILES_LIMIT:(\d+)\z }xms ) {
+            $open_files_limit = $1;
+        }
     }
 
     close $file_fh;
@@ -1709,18 +1689,19 @@ sub parse_output_file {
                                $src_phpini_date_timezone, $dst_phpini_date_timezone
     );
     print_parsed_mysql_username_conflicts( @mysql_username_conflicts ) if @mysql_username_conflicts;
-
+    print_parsed_mysql_openfilesimit($open_files_limit);
 
 }
 
 sub print_parsed_eula_info {
     if ( $eula_accepted == 0 ) {
-        print_header('cPanel End User License Agreement');
-        print q{
-The license agreement has not yet been accepted. Before we can proceed,
-you must log into WHM as root and accept the license agreement, then
-complete the initial setup that follows.
-}
+        if ( $es == 0 ) {
+            print_header('cPanel End User License Agreement');
+            print q{The license agreement has not yet been accepted. Before we can proceed, you must log into WHM as root and accept the license agreement, then complete the initial setup that follows.
+};
+        }
+        else { #ES
+        }
     }
 }
 
@@ -1754,28 +1735,60 @@ sub print_parsed_php_info {
     ## if src php is higher than 5
     if ( $src_php_major > 5 ) {
         $print_message = 1;
-        $addendum = "cPanel only supports PHP 5 at this time. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.\n";
+        if ( $es == 0 ) {
+            $addendum = qq{
+cPanel only supports PHP 5 at this time. Since we cannot change the version of PHP to match that of the $src_panel_noversion server, this message is informational only. No action is required on your part.
+            };
+        }
+        else { #ES
+        }
     }
     ## if src php is lower than 5
     elsif ( $src_php_major < 5 or ( $src_php_major == 5 and $src_php_minor < $min_php_minor_supported )) {
         $print_message = 1;
-        $addendum = "The versions of PHP do not match. cPanel currently supports PHP 5.3, 5.4, and 5.5. Unfortunately, due to the end-of-life PHP version on the $src_panel_noversion server[1], there may be issues with your sites displaying correctly on the cPanel server. Many features available in PHP <= 5.2 were deprecated in PHP 5.3 and later removed in PHP 5.4 entirely[2].\n\n";
-        $addendum .= "We can definitely move forward with the migration. However, we would be unable to determine if any of your PHP driven websites may be incompatible with 5.3 or higher. As such it’s highly recommended that any PHP based websites are updated (if necessary) to be compatible with versions of PHP beyond 5.2.\n\n";
-        $addendum .= "Additionally, after the migration, we may not be able to provide assistance to issues related to websites which require PHP <= 5.2.\n\n";
-        $addendum .= "[1] http://php.net/eol.php\n";
-        $addendum .= "[2] http://www.php.net/manual/en/migration53.deprecated.php\n";
+        if ( $es == 0 ) {
+            $addendum = qq{
+The versions of PHP do not match. cPanel currently supports PHP 5.3, 5.4, and 5.5. Unfortunately, due to the end-of-life PHP version on the $src_panel_noversion server[1], there may be issues with your sites displaying correctly on the cPanel server. Many features available in PHP <= 5.2 were deprecated in PHP 5.3 and later removed in PHP 5.4 entirely[2].
+
+
+We can definitely move forward with the migration. However, we would be unable to determine if any of your PHP driven websites may be incompatible with 5.3 or higher. As such it’s highly recommended that any PHP based websites are updated (if necessary) to be compatible with versions of PHP beyond 5.2.
+
+
+Additionally, after the migration, we may not be able to provide assistance to issues related to websites which require PHP <= 5.2.
+
+
+[1] http://php.net/eol.php
+[2] http://www.php.net/manual/en/migration53.deprecated.php
+            };
+        }
+        else { #ES
+        }
     }
 
     ## if cPanel isn't using PHP 5 for some reason
     if ( $dst_php_major != 5 ) {
         $print_message = 1;
-        $addendum = "cPanel only supports PHP 5 at this time. If you have elected to have us recompile PHP to add support for certain PHP modules, we will be unable to do so unless we can install PHP 5. We currently support PHP $supported_php_versions.\n\n";
-        $addendum .= "Would you like us to install PHP 5 on the cPanel server? If yes, which version? If no version of specified, we will compile the latest available.\n\n";
-        $addendum .= "[ ] YES   [ ] NO\n";
+        if ( $es == 0 ) {
+            $addendum = qq{
+cPanel only supports PHP 5 at this time. If you have elected to have us recompile PHP to add support for certain PHP modules, we will be unable to do so unless we can install PHP 5. We currently support PHP $supported_php_versions.
+
+
+Would you like us to install PHP 5 on the cPanel server? If yes, which version? If no version of specified, we will compile the latest available.
+
+
+[ ] YES   [ ] NO
+            };
+        }
+        else { #ES
+        }
     }
 
     if ( $print_message == 1 ) {
-        print_header('PHP Versions');
+        if ( $es == 0 ) {
+            print_header('PHP Versions');
+        }
+        else { #ES
+        }
         print "${src_panel_noversion}: $src_php\n";
         print "cPanel: $dst_php\n";
         print "\n$addendum\n";
@@ -1792,17 +1805,32 @@ sub print_parsed_mysql_info {
         $src_mysql =~ s/:UNSUPPORTED//g;
 
         $print_message = 1;
-        $addendum = "The $src_panel_noversion server is running MySQL ${src_mysql}. This version is not supported at this time. We can attempt the migration anyway, but you may need to create the databases on the cPanel server, then manually export and import your databases.\n\n";
-        $addendum .= "Would you like us to proceed with the migration anyway?\n\n";
-        $addendum .= "[ ] YES  [ ] NO\n";
+        if ( $es == 0 ) {
+            $addendum = qq{
+The $src_panel_noversion server is running MySQL ${src_mysql}. This version is not supported at this time. We can attempt the migration anyway, but you may need to create the databases on the cPanel server, then manually export and import your databases.
+
+
+Would you like us to proceed with the migration anyway?
+
+
+[ ] YES  [ ] NO
+            };
+        }
 
         if ( $dst_mysql =~ /^4/ ) {
-        $addendum .= "The cPanel server is running MySQL 4, which is not supported at this time. Our recommendation would be to upgrade MySQL via WHM >> MySQL Upgrade before we proceed further.\n\n";
+            $addendum .= qq{
+The cPanel server is running MySQL 4, which is not supported at this time. Our recommendation would be to upgrade MySQL via WHM >> MySQL Upgrade before we proceed further.
+
+            };
         }
     }
 
     if ( $print_message == 1 ) {
-        print_header('MySQL Versions');
+        if ( $es == 0 ) {
+            print_header('MySQL Versions');
+        }
+        else { #ES
+        }
         print "${src_panel_noversion}: $src_mysql\n";
         print "cPanel: $dst_mysql\n";
         print "\n$addendum\n";
@@ -1816,34 +1844,51 @@ sub print_parsed_bad_username_info {
     
     # get panel version. print how to change username based on panel version
 
-    print_header('Bad Usernames');
-    print "Usernames were found on the $src_panel_noversion server that are not compatible with cPanel servers. You will need to rename those users before we can copy them. A list of these users is as follows:\n\n";   
-    print "USERNAME: DOMAIN\n";
+    if ( $es == 0 ) {
+        print_header('Bad Usernames');
+        print q{
+Usernames were found on the $src_panel_noversion server that are not compatible with cPanel servers. You will need to rename those users before we can copy them. A list of these users is as follows:
+
+
+USERNAME: DOMAIN
+};
+    }
+    else { #ES
+    }
     
     for my $domain ( sort keys %badusers ) {
         print "${domain}: $badusers{$domain}\n";
     }
  
-    print_username_change_info();
+    if ( $es == 0 ) {
+        print_username_change_info();
+    }
+    else {
+        print_username_change_info_ES();
+    }
 }
 
 sub print_reseller_username_change_info {
     # This has only been tested on Plesk 10, 11, and 11.5.
-     print q{
+    if ( $es == 0 ) {
+        print q{
 1. Log into Plesk as admin
 2. Click "Resellers"
 3. Click the link under the "Reseller Name" column
 4. Click "Change Login Info"
-}
-
+        };
+    }
+    else { #ES
+    }
 }
 
 sub print_username_change_info {
-       print "\nWhen renaming the users, please use the following guidelines:\n";
     print q{
+When renaming the users, please use the following guidelines:
+
 * Use only letters (lowercase only), and numbers if desired
 * Users cannot start with a number, or with the string "test"
-};
+    };
 
     if ( $src_panel_noversion =~ /Plesk/ ) {
         print "\n\nYou can change usernames using these steps:\n";
@@ -1854,15 +1899,15 @@ sub print_username_change_info {
 2. Click "Domains"
 3. Click on the domain
 4. Click on "Setup"
-}
+            };
         }
         elsif ( $src_panel eq 'Plesk9' ) {
-        print q{
+            print q{
 1. Log into Plesk as "admin"
 2. Click "Domains"
 3. Click on the domain
 4. Click on "Web Hosting Settings"
-}
+            };
         }
         elsif ( $src_panel eq 'Plesk10' ) {
             print q{
@@ -1870,7 +1915,7 @@ sub print_username_change_info {
 2. Click "Domains"
 3. Click on the domain
 4. Click on "Change Hosting Settings"
-}
+            };
         }
         elsif ( $src_panel eq 'Plesk10SMB' ) {
             print q{
@@ -1878,7 +1923,7 @@ sub print_username_change_info {
 2. Click "Websites & Domains"
 3. Click "Website Settings"
 4. Change the value in the box labeled "FTP username"
-}
+            };
         }
         elsif ( $src_panel eq 'Plesk11' ) {
             print q{
@@ -1886,7 +1931,7 @@ sub print_username_change_info {
 2. Click "Domains"
 3. Click on the domain
 4. Click "Change Hosting Settings"
-}
+            };
         }
     }
     elsif ( $src_panel =~ /Ensim/ ) {
@@ -1894,27 +1939,51 @@ sub print_username_change_info {
 1. Log into Ensim as "admin"
 2. Click "Site Manager"
 3. On the line that contains the domain, click the pencil icon to edit
-}
+        };
     }
+}
+
+sub print_username_change_info_ES { #ES
+    print "not yet implemented\n";
 }
 
 sub print_parsed_ipaddr_info {
     my ( $src_dedicated_ipaddrs_used, $dst_ipaddrs_free, @sites_on_dedicated_ipaddrs ) = @_;
 
     if ( $src_dedicated_ipaddrs_used > $dst_ipaddrs_free ) {
-        print_header('IP Addresses');
-        print "On the $src_panel_noversion server, the following sites are on dedicated IP addresses:\n\n";
+        if ( $es == 0 ) {
+            print_header('IP Addresses');
+            print qq{
+On the $src_panel_noversion server, the following sites are on dedicated IP addresses:
+            };
+        }
+        else { #ES
+        }
 
+        print "\n";
         for my $site ( sort @sites_on_dedicated_ipaddrs ) {
             print "* $site\n";
         }
 
-        print "\n\nHowever, the cPanel server has $dst_ipaddrs_free dedicated IP address(es) available.\n\n";
-        print "If the sites listed above need to be placed on dedicated IP addresses, you may need to contact your server provider about adding more IP addresses to your server.\n";
-        print "\nIf you are using cPanel 11.38 or higher on an OS with SNI support (such as CentOS 6), then you may not need any additional IP addresses. Please check with your server provider to be sure.\n"; 
+        if ( $es == 0 ) {
+            print qq{
 
-        print "\n\nDo you need us to place those sites on dedicated IP addresses?\n\n";
-        print "[ ] YES   [ ] NO\n";
+However, the cPanel server has $dst_ipaddrs_free dedicated IP address(es) available.
+
+
+If the sites listed above need to be placed on dedicated IP addresses, you may need to contact your server provider about adding more IP addresses to your server.
+
+If you are using cPanel 11.38 or higher on an OS with SNI support (such as CentOS 6), then you may not need any additional IP addresses. Please check with your server provider to be sure.
+
+
+Do you need us to place those sites on dedicated IP addresses?
+
+
+[ ] YES   [ ] NO
+            };
+        }
+        else { #ES
+        }
     }
 }
 
@@ -1923,15 +1992,19 @@ sub print_parsed_forwarding_domain_info {
 
     return if !%forwarding_domains;
 
-    print_header('Forwarding Domains');
+    if ( $es == 0 ) {
+        print_header('Forwarding Domains');
 
-    print q{
+        print q{
 We cannot transfer the following forwarding domains, as they are not hosting accounts.
 You can add them in WHM >> Setup/Edit Domain Forwarding (this requires just 1 additional IP address on the cPanel server if one does not exist already):
-};
+
+        };
+    }
+    else { #ES
+    }
 
     print "\n";
-
     for my $domain ( sort keys %forwarding_domains ) {
         print "${domain}: forwarded to -> $forwarding_domains{$domain}\n";
     }
@@ -1941,16 +2014,20 @@ sub print_parsed_nohosting_domain_info {
     my @nohosting_domains = @_;
     return if !@nohosting_domains;
 
-    print_header('No Hosting domains');
+    if ( $es == 0 ) {
+        print_header('No Hosting domains');
 
-    print q{
+        print q{
 The following are domains that we have found that do not have a hosting plan.
 The cPanel & WHM transfer tools will not be able to transfer these domains.
 In order to make them compatible with the transfer tools, please add hosting to these domains:
-};
+
+        };
+    }
+    else { #ES
+    }
 
     print "\n";
-
     for my $domain ( sort @nohosting_domains ) {
         print "* $domain\n";
     }
@@ -1962,9 +2039,20 @@ sub print_parsed_tomcat_info {
     if ( $src_tomcat and !$dst_tomcat ) {
         print_header('Tomcat');
 
-        print "\n\nTomcat is installed on the $src_panel server, but not on the cPanel server.\n";
-        print "Do you need us to install Tomcat on the cPanel server?\n\n";
-        print "[ ] YES  [ ] NO\n";
+        if ( $es == 0 ) {
+            print qq{
+
+Tomcat is installed on the $src_panel server, but not on the cPanel server.
+
+Do you need us to install Tomcat on the cPanel server?
+
+
+[ ] YES  [ ] NO
+
+            };
+        }
+        else { #ES
+        }
     }
 }
 
@@ -1974,10 +2062,20 @@ sub print_parsed_coldfusion_info {
     if ( $src_coldfusion and !$dst_coldfusion ) {
         print_header('ColdFusion');
 
-        print "\n\nColdFusion appears to be running on the $src_panel server, but not on the cPanel server.\n";
-        print "cPanel does not support the installation, configuration, or maintenance of ColdFusion.\n";
-        print "If your websites require ColdFusion, they will not work if it is not installed.\n";
-        print "If you need assistance with installing ColdFusion, you would need to contact your sysadmin.\n";
+        if ( $es == 0 ) {
+            print qq{
+
+ColdFusion appears to be running on the $src_panel server, but not on the cPanel server.
+
+cPanel does not support the installation, configuration, or maintenance of ColdFusion.
+
+If your websites require ColdFusion, they will not work if it is not installed.
+
+If you need assistance with installing ColdFusion, you would need to contact your sysadmin.
+            };
+        }
+        else { #ES
+        }
     }
 }
 
@@ -1987,16 +2085,42 @@ sub print_parsed_reseller_username_conflicts {
 
     @reseller_username_conflicts = sort @reseller_username_conflicts;
 
-    print_header('Reseller Username Conflicts');
+    if ( $es == 0 ) {
+        print_header('Reseller Username Conflicts');
 
-    print "Plesk allows duplicate usernames for resellers and system accounts, while cPanel does not.\n";
-    print "As such, the following usernames will need to be renamed to something unique before they can be copied:\n\n";
+        print qq{
+Plesk allows duplicate usernames for resellers and system accounts, while cPanel does not.
+
+As such, the following usernames will need to be renamed to something unique before they can be copied:
+
+        };
+    }
+    else { #ES
+    }
 
     for my $reseller (@reseller_username_conflicts) {
         print "* $reseller\n";
     }
 
     print_reseller_username_change_info();
+}
+
+sub print_parsed_mysql_openfilesimit {
+    my $open_files_limit = shift or return;
+
+    if ( $open_files_limit < 10_000 ) {
+        print_header('MySQL open_files_limit');
+        print qq{
+MySQL's open_files_limit is set to $open_files_limit which may be lower than what is
+necessary to successfully copy databases. I recommend increasing this to 10000 and
+restarting MySQL. If you'd like, we can do this for you by backing up /etc/my.cnf,
+adding open_files_limit=10000 to the file, and restarting MySQL.
+
+May we raise the open_files_limit setting for MySQL?
+
+[ ] YES  [ ] NO
+    }
+    }
 }
 
 sub print_parsed_phpini_items {
@@ -2006,45 +2130,73 @@ sub print_parsed_phpini_items {
          $src_phpini_date_timezone, $dst_phpini_date_timezone
     ) = @_;
 
-    my $message;
+    my $addendum;
 
 
     if ( $src_phpini_memory_limit and $dst_phpini_memory_limit ) {
         if ( $src_phpini_memory_limit > $dst_phpini_memory_limit ) {
-            $message .= "memory_limit:\n";
-            $message .= "  ${src_panel_noversion}: ${src_phpini_memory_limit}M\n  cPanel: ${dst_phpini_memory_limit}M\n\n";
+            $addendum .= qq{
+memory_limit:
+${src_panel_noversion}: ${src_phpini_memory_limit}M\n  cPanel: ${dst_phpini_memory_limit}M
+
+            };
         }
     }
 
     if ( $src_phpini_post_max_size and $dst_phpini_post_max_size ) {
         if ( $src_phpini_post_max_size > $dst_phpini_post_max_size ) {
-            $message .= "post_max_size:\n";
-            $message .= "  ${src_panel_noversion}: ${src_phpini_post_max_size}M\n  cPanel: ${dst_phpini_post_max_size}M\n\n";
+            $addendum .= qq{
+post_max_size:
+
+    ${src_panel_noversion}: ${src_phpini_post_max_size}M
+    cPanel: ${dst_phpini_post_max_size}M
+
+            };
         }
     }
 
     if ( $src_phpini_upload_max_filesize and $dst_phpini_upload_max_filesize ) {
         if ( $src_phpini_upload_max_filesize > $dst_phpini_upload_max_filesize ) {
-            $message .= "upload_max_filesize:\n";
-            $message .= "  ${src_panel_noversion}: ${src_phpini_upload_max_filesize}M\n  cPanel: ${dst_phpini_upload_max_filesize}M\n\n";
+            $addendum .= qq{
+upload_max_filesize:
+
+    ${src_panel_noversion}: ${src_phpini_upload_max_filesize}M
+    cPanel: ${dst_phpini_upload_max_filesize}M
+            };
         }
     }
 
     if ( $src_phpini_date_timezone and $dst_phpini_date_timezone ) {
         if ( $src_phpini_date_timezone ne $dst_phpini_date_timezone ) {
-            $message .= "date\.timezone:\n";
-            $message .= "  ${src_panel_noversion}: ${src_phpini_date_timezone}\n  cPanel: ${dst_phpini_date_timezone}\n\n";
+            $addendum .= qq{
+date.timezone:
+
+    ${src_panel_noversion}: ${src_phpini_date_timezone}
+    cPanel: ${dst_phpini_date_timezone}
+            };
         }
     }
 
-    if ($message) {
-        print_header('php.ini Settings');
-        print "We have checked several of the most commonly customized configuration options in php.ini and found some differences.\n\n";
-        print "To ensure that PHP applications function properly on the cPanel server, it is recommended that the settings be the same on both servers.\n\n";
-        print "The differences that we found are listed below:\n\n";
-        print "$message\n\n";
-        print "Would you like us to modify php.ini on the cPanel server to use the same configuration settings listed above?\n\n";
-        print "[ ] YES  [ ] NO\n";
+    if ($addendum) {
+        if ( $es == 0 ) {
+            print_header('php.ini Settings');
+            print qq{
+We have checked several of the most commonly customized configuration options in php.ini and found some differences.
+
+To ensure that PHP applications function properly on the cPanel server, it is recommended that the settings be the same on both servers.
+
+The differences that we found are listed below:
+
+$addendum
+
+Would you like us to modify php.ini on the cPanel server to use the same configuration settings listed above?
+
+
+[ ] YES  [ ] NO
+            };
+        }
+        else { #ES
+        }
     }
 }
 
@@ -2182,10 +2334,16 @@ sub check_for_ssl_certificates {
 sub check_for_dns_clustering {
     return if !-e '/var/cpanel/useclusteringdns';
 
-    print_header('DNS CLUSTERING (for libkeyutils migrations)');
-    print "The following cluster members were found to be configured on this server\n";
-    print "(note: the reverse trust relationship is not known, and would need to be\n";
-    print "determined by logging into WHM on the cluster server and checking it there):\n\n";
+    if ( $es == 0 ) {
+        print_header('DNS CLUSTERING (for libkeyutils migrations)');
+        print qq{
+The following cluster members were found to be configured on this server
+(note: the reverse trust relationship is not known, and would need to be
+determined by logging into WHM on the cluster server and checking it there):
+        };
+    }
+    else { #ES
+    }
 
     my $cluster_dir = '/var/cpanel/cluster/root/config';
     my @dir_contents;
@@ -2309,15 +2467,31 @@ that would not be copied. Things to keep in mind are:
 sub print_parsed_mysql_username_conflicts {
     my @mysql_username_conflicts = @_;
     my $count = 1;
-    print_header('mysql Username Conflicts');
-    print "\nmysql username conflicts have been found. To fix, please rename the user(s) specified below:\n\n";
+    if ( $es == 0 ) {
+        print_header('mysql Username Conflicts');
+        print qq{
+mysql username conflicts have been found. To fix, please rename the user(s) specified below:
+
+        };
+    }
+    else { #ES
+    }
 
     for my $conflict (@mysql_username_conflicts) {
         my ( $domain1, $user, $domain2 ) = split /:/, $conflict;
         # subscription1.test has mysql user "example", but there is a Plesk account named example, owned by example.com
+        if ( $es == 0 ) {
             print "[CONFLICT $count] $domain1 has mysql user \"$user\" (to fix, rename ${domain2}'s \"$user\")\n";
-            $count++;
+        }
+        else { #ES
+        }
+        $count++;
     }
 
-    print_username_change_info();
+    if ( $es == 0 ) {
+        print_username_change_info();
+    }
+    else {
+        print_username_change_info_ES();
+    }
 }
