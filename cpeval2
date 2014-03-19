@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.9';
+my $version = '1.10';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -80,9 +80,13 @@ sub print_news_plesk {
 }
 
 sub print_news_ensim {
+    my $arch = qx{ arch };
+    chomp $arch;
+    return if $arch ne 'x86_64';
+
     print q{   !! ENSIM BLOCKERS !!
 
-Case 72981: Filed 7 months ago.
+Case 72981: Filed July 2013. Patch soon, maybe.
 
 Use Keith's workaround found in the case (from the "wget" to the "chattr" in the FIRST block of commands (9 commands))
     };
