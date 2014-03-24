@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.10';
+my $version = '1.11';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -2252,7 +2252,7 @@ sub print_htype_none {
 unless ( $infile ) {
     print_header('DISK SPACE');
     print "Please review this output now, compare with the output from the other server, and check for possible issues:\n\n";
-    print `df -Ph | head -1 ; df -Ph | column -t | sort | uniq | egrep -v '^Filesystem|/var/named/run-root/var/run/dbus|/var/named/chroot|/usr/local/psa/handlers/|/virtfs/| /tmp\$'`;
+    print `df -Ph | column -t | head -1 ; df -Ph | column -t | sort | uniq | egrep -v '^Filesystem|/var/named/run-root/var/run/dbus|/var/named/chroot|/usr/local/psa/handlers/|/virtfs/| /tmp\$'`;
     print "\nA few things to keep in mind are:\n";
     print "  * pkgacct-* packages accounts in /home . Is /home on /, or is it separate?\n";
     print "  * Need to change the partition that accounts are packaged to? Check the 'MigrationsReference' article\n";
