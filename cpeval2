@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.11';
+my $version = '1.12';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -1705,6 +1705,12 @@ sub print_parsed_eula_info {
 };
         }
         else { #ES
+            print_header('cPanel Licencia');
+            print q{
+La licencia de cPanel no ha sido aceptada. Antes de que podamos continuar,
+por favor acceda a WHM como root y acepte la licencia, inmediatamente despues
+completen la configuración inicial que sigue.
+            };
         }
     }
 }
@@ -1745,6 +1751,9 @@ cPanel only supports PHP 5 at this time. Since we cannot change the version of P
             };
         }
         else { #ES
+            $addendum = q{
+En estos momentos cPanel sólo es compatible con PHP 5. Debido a esto no podremos cambiar la versión de PHP para que coincida con la del servidor $src_panel_noversion, este mensaje es para su información. No se requiere ninguna acción de usted.
+            };
         }
     }
     ## if src php is lower than 5
@@ -1766,6 +1775,16 @@ Additionally, after the migration, we may not be able to provide assistance to i
             };
         }
         else { #ES
+            $addendum = qq{
+Las versiones de PHP no son la mismas. cPanel actualmente sólo es compatible con PHP 5.3, 5.4, y 5.5. Desafortunadamente, debido a la que la versiones de PHP requeridos han alcanzado el fin de vida. En el servidor $src_panel_noversion [1], puede haber problemas para que los sitios se muestren correctamente en el servidor de cPanel. Muchas de las funciones disponibles en PHP <= 5.2 fueron descontinuados en PHP 5.3 y removidos completamente en PHP 5.4[2].
+
+Podemos continuar con la migración. Sin embargo, no podremos determinar si alguno de sus sitios web PHP serán incompatibles con 5.3 o mayor. Debido a esto, recomendamos que actualicen sus sitios web para que sean compatibles con versiones de PHP mayores a 5.2.
+
+Además, después de la migración, no podemos proporcionar asistencia con problemas ocurridosn con sitios que requieran PHP <= 5.2.
+
+[1] http://php.net/eol.php
+[2] http://www.php.net/manual/en/migration53.deprecated.php
+            };
         }
     }
 
@@ -1784,6 +1803,13 @@ Would you like us to install PHP 5 on the cPanel server? If yes, which version? 
             };
         }
         else { #ES
+            $addendum = qq{
+En estos momentos cPanel sólo es compatible con PHP 5. Si usted ha optado que nosotros compilemos PHP para añadir soporte para determinados módulos de PHP, no podremos hacerlo a menos que podamos instalar PHP 5. Actualmente, soportamos PHP $supported_php_versions.\n\n";
+
+¿Quieres que instalemos PHP 5 en el servidor cPanel? Si es así, qué versión? Si no especifica una versión, vamos a compilar la última versión disponible.
+
+[ ] SI   [ ] NO
+            };
         }
     }
 
@@ -1792,6 +1818,7 @@ Would you like us to install PHP 5 on the cPanel server? If yes, which version? 
             print_header('PHP Versions');
         }
         else { #ES
+            print_header('Versiones de PHP');
         }
         print "${src_panel_noversion}: $src_php\n";
         print "cPanel: $dst_php\n";
@@ -1834,6 +1861,13 @@ The cPanel server is running MySQL 4, which is not supported at this time. Our r
             print_header('MySQL Versions');
         }
         else { #ES
+            $addendum = qq{
+El servidor $src_panel_noversion está utiliza MySQL ${src_mysql}. Esta versión no es soportado en estos momentos. Podemos intentar continuar con la migración, pero usted tendra que crear las bases de datos en el servidor de cPanel, despues manualmente exportar e importar sus bases de datos.
+
+Quieres que procedamos con la migración?
+
+[ ] SI   [ ] NO
+            };
         }
         print "${src_panel_noversion}: $src_mysql\n";
         print "cPanel: $dst_mysql\n";
@@ -1858,6 +1892,9 @@ USERNAME: DOMAIN
 };
     }
     else { #ES
+        print_header('Malos nombres de usuario');
+        print "Los nombres de usuario que se encuentran en el servidor de $src_panel_noversion no son compatibles con los servidores de cPanel. Usted tendrá que cambiar el nombre de los usuarios antes de poder copiarlos. La lista de estos usuarios son:\n\n";
+        print "NOMBRE DE USUARIO: DOMINIO\n";
     }
     
     for my $domain ( sort keys %badusers ) {
@@ -1883,6 +1920,12 @@ sub print_reseller_username_change_info {
         };
     }
     else { #ES
+        print q{
+1. Inicie sesión en Plesk como "admin"
+2. Haga clic en "Resellers"
+3. Haga clic en el enlace debajo de la columna "Reseller Name"
+4. Haga clic en "Change Login Info"
+        };
     }
 }
 
@@ -1948,8 +1991,68 @@ When renaming the users, please use the following guidelines:
 }
 
 sub print_username_change_info_ES { #ES
-    print "not yet implemented\n";
+    print q{
+Cuando cambie el nombre de los usuarios, por favor siga las siguientes directivas:\n";
+
+* Utilice solamente letras (solamente minúsculas), y números
+* Nombres de usuario no pueden comenzar con un número o con el string "test"
+    };
+
+    if ( $src_panel_noversion =~ /Plesk/ ) {
+        print q{
+Usted puede cambiar los nombres de los usuarios siguiendo las siguiente instrucciones:
+        };
+
+        if ( $src_panel eq 'Plesk8' ) {
+            print q{
+1. Inicie sesión en Plesk como "admin"
+2. Haga clic en "Domains"
+3. Haga clic en el dominio
+4. Haga clic en "Setup"
+            };
+        }    
+        elsif ( $src_panel eq 'Plesk9' ) {
+            print q{
+1. Inicie sesión en Plesk como "admin"
+2. Haga clic en "Domains"
+3. Haga clic en el dominio
+4. Haga clic en "Web Hosting Settings"
+            };
+        }    
+        elsif ( $src_panel eq 'Plesk10' ) {
+            print q{
+1. Inicie sesión en Plesk como "admin"
+2. Haga clic en "Domains"
+3. Haga clic en el dominio
+4. Haga clic en "Change Hosting Settings"
+            };
+        }    
+        elsif ( $src_panel eq 'Plesk10SMB' ) {
+            print q{
+1. Inicie sesión en Plesk como "admin"
+2. Haga clic en "Websites & Domains"
+3. Haga clic en "Website Settings"
+4. Cambie el valor en la casilla "FTP username"
+            };
+        }    
+        elsif ( $src_panel eq 'Plesk11' ) {
+            print q{
+1. Inicie sesión en Plesk como "admin"
+2. Haga clic en "Domains"
+3. Haga clic en el dominio
+4. Haga clic en "Change Hosting Settings"
+            };
+        }    
+    }    
+    elsif ( $src_panel =~ /Ensim/ ) {
+        print q{
+1. Inicie sesión en Ensim como "admin"
+2. Haga clic en "Site Manager"
+3. En la línea que contiene el dominio, haga clic en el icono del lápiz para editar
+        };
+    }    
 }
+
 
 sub print_parsed_ipaddr_info {
     my ( $src_dedicated_ipaddrs_used, $dst_ipaddrs_free, @sites_on_dedicated_ipaddrs ) = @_;
@@ -1962,6 +2065,9 @@ On the $src_panel_noversion server, the following sites are on dedicated IP addr
             };
         }
         else { #ES
+            print_header('Direcciones IP');
+            print "En el servidor de $src_panel_noversion, los siguientes sitios tienen direcciones IP dedicadas:\n\n";
+
         }
 
         print "\n";
@@ -1987,6 +2093,19 @@ Do you need us to place those sites on dedicated IP addresses?
             };
         }
         else { #ES
+            print qq{
+
+Sin embargo, el servidor cPanel tiene $dst_ipaddrs_free IP dedicado(s) disponible(s).
+
+
+Si los sitios mencionados anteriormente deben ser colocados en direcciones IP dedicadas, puede que usted tenga que ponerse en contacto con su proveedor de servidor acerca de cómo agregar más direcciones IP a su servidor.
+
+Si está utilizando cPanel 11.38 o mayor en un sistema operativo con soporte SNI (como CentOS 6), entonces puede que no necesite ninguna de las direcciones IP adicionales. Por favor, consulte con su proveedor de servidor para estar seguro.
+
+¿Necesitas que estos sitios tengan direcciones IP dedicadas?
+
+[ ] SI   [ ] NO
+            };
         }
     }
 }
@@ -2006,11 +2125,20 @@ You can add them in WHM >> Setup/Edit Domain Forwarding (this requires just 1 ad
         };
     }
     else { #ES
+        print q{
+No podemos transferir los siguientes forwarding domains, ya que no son cuentas de hosting.
+Usted puede añadirlos en WHM >> Setup/Edit Domain Forwarding (esto requiere sólo 1 dirección IP adicional en el servidor de cPanel si es que uno no existe):
+        };
     }
 
     print "\n";
     for my $domain ( sort keys %forwarding_domains ) {
-        print "${domain}: forwarded to -> $forwarding_domains{$domain}\n";
+        if ( $es == 0 ) {
+            print "${domain}: forwarded to -> $forwarding_domains{$domain}\n";
+        }
+        else { #ES
+            print "${domain}: remitido a -> $forwarding_domains{$domain}\n";
+        }
     }
 }
 
@@ -2029,6 +2157,12 @@ In order to make them compatible with the transfer tools, please add hosting to 
         };
     }
     else { #ES
+        print_header('Dominios sin hosting');
+        print q{
+Los siguientes son dominios que hemos encontrado que no tienen un plan de hosting.
+Las herramientas de transferencia de cPanel y WHM no serán capaces de transferir estos dominios.
+Con el fin de hacerlos compatibles con las herramientas de transferencia, por favor agregue un plan de hosting a estos dominios:
+        };
     }
 
     print "\n";
@@ -2056,6 +2190,14 @@ Do you need us to install Tomcat on the cPanel server?
             };
         }
         else { #ES
+            print qq{
+
+Tomcat está instalado en el servidor $ src_panel, pero no en el servidor cPanel.
+
+¿Necesiten que instalemos Tomcat en el servidor de cPanel?
+
+[ ] SI   [ ] NO
+            };
         }
     }
 }
@@ -2079,6 +2221,15 @@ If you need assistance with installing ColdFusion, you would need to contact you
             };
         }
         else { #ES
+            print qq{
+ColdFusion parece estar en ejecución en el servidor $src_panel, pero no en el servidor cPanel.
+
+cPanel does not support the installation, configuration, or maintenance of ColdFusion.
+
+Si sus páginas web requieren ColdFusion, no van a funcionar si no está instalado.
+
+Si usted necesita ayuda con la instalación de ColdFusion, usted tendría que ponerse en contacto con su administrador de sistemas.
+            };
         }
     }
 }
@@ -2100,6 +2251,13 @@ As such, the following usernames will need to be renamed to something unique bef
         };
     }
     else { #ES
+        print_header('Conflictos de Nombre de usuarios de revendedores');
+
+        print q{
+Plesk permite los nombres de usuario duplicados para los revendedores y las cuentas del sistema, mientras que cPanel no lo hace.
+
+Como tal, tendrá que ser cambiado a algo único antes de que se pueden copiar los siguientes nombres de usuario:
+        };
     }
 
     for my $reseller (@reseller_username_conflicts) {
@@ -2113,17 +2271,28 @@ sub print_parsed_mysql_openfilesimit {
     my $open_files_limit = shift or return;
 
     if ( $open_files_limit < 10_000 ) {
-        print_header('MySQL open_files_limit');
-        print qq{
-MySQL's open_files_limit is set to $open_files_limit which may be lower than what is
-necessary to successfully copy databases. I recommend increasing this to 10000 and
-restarting MySQL. If you'd like, we can do this for you by backing up /etc/my.cnf,
-adding open_files_limit=10000 to the file, and restarting MySQL.
+        if ( $es == 0 ) {
+            print_header('MySQL open_files_limit');
+            print qq{
+On the cPanel server, MySQL's open_files_limit is set to $open_files_limit which may be lower
+than what is necessary to successfully copy databases. I recommend increasing this to 10000
+and restarting MySQL. If you'd like, we can do this for you by backing up /etc/my.cnf, adding
+open_files_limit=10000 to the file, and restarting MySQL.
 
 May we raise the open_files_limit setting for MySQL?
 
 [ ] YES  [ ] NO
-    }
+            };
+        }
+        else { #ES
+            print q{
+Los open_files_limit de MySQL en el servidor cPanel tienen el valor de 1024. Este valor es menos de lo que recomendamos , que puede ser inferior a lo que es necesario copiar correctamente las bases de datos. Recomiendo aumentar esto a 10000 y reiniciar MySQL. Si usted desea, podemos hacerlo para usted antes haríamos una copia de /etc/ my.cnf, añadiendo open_files_limit = 10000 para el archivo y reiniciaremos  MySQL.
+
+Podemos aumentar el ajuste de open_files_limit para MySQL?
+
+[ ] SI [ ] NO
+            };
+        }
     }
 }
 
@@ -2141,7 +2310,8 @@ sub print_parsed_phpini_items {
         if ( $src_phpini_memory_limit > $dst_phpini_memory_limit ) {
             $addendum .= qq{
 memory_limit:
-${src_panel_noversion}: ${src_phpini_memory_limit}M\n  cPanel: ${dst_phpini_memory_limit}M
+
+    ${src_panel_noversion}: ${src_phpini_memory_limit}M\n    cPanel: ${dst_phpini_memory_limit}M
 
             };
         }
@@ -2200,6 +2370,23 @@ Would you like us to modify php.ini on the cPanel server to use the same configu
             };
         }
         else { #ES
+            print_header('Configuración php.ini');
+            print qq{
+Hemos revisado varias de las opciones de configuración más comúnmente personalizados en php.ini y encontramos algunas diferencias.
+
+
+Para asegurarse de que las aplicaciones PHP funcionan correctamente en el servidor de cPanel, se recomienda que los ajustes sean los mismos en ambos servidores.
+
+
+Las diferencias encontradas se enumeran a continuación:
+
+
+$addendum
+
+¿Quieres que modifiquemos php.ini en el servidor cPanel utilizar los mismos ajustes de configuración mencionados anteriormente?
+
+[ ] SI  [ ] NO
+            };
         }
     }
 }
@@ -2479,6 +2666,8 @@ mysql username conflicts have been found. To fix, please rename the user(s) spec
         };
     }
     else { #ES
+        print_header('conflictos de nombre de usuario mysql');
+        print "\nSe han encontrado conflictos con nombre(s) de usuario(s) de mysql. Para solucionarlo, cambie el nombre del usuario(s):\n\n";
     }
 
     for my $conflict (@mysql_username_conflicts) {
@@ -2488,6 +2677,7 @@ mysql username conflicts have been found. To fix, please rename the user(s) spec
             print "[CONFLICT $count] $domain1 has mysql user \"$user\" (to fix, rename ${domain2}'s \"$user\")\n";
         }
         else { #ES
+            print "[CONFLICTO $count] $domain1 tiene el usuario mysql \"$user\" (para corregir, cambie el nombre ${domain2}'s \"$user\")\n";
         }
         $count++;
     }
