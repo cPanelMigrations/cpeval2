@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.12';
+my $version = '1.13';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -86,9 +86,10 @@ sub print_news_ensim {
 
     print q{   !! ENSIM BLOCKERS !!
 
-Case 72981: Filed July 2013. Patch soon, maybe.
+Case 72981: In _DEVEL as of March 26th, 2014.
 
-Use Keith's workaround found in the case (from the "wget" to the "chattr" in the FIRST block of commands (9 commands))
+!! USE _DEVEL !!
+
     };
 
     sleep 3;
