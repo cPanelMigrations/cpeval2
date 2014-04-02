@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.13';
+my $version = '1.14';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -1676,7 +1676,12 @@ sub parse_output_file {
     my $src_disk_usage_ref = \@src_disk_usage;
     my $dst_disk_usage_ref = \@dst_disk_usage;
 
-    print "Hi,\n\nThe pre migration server evaluation is complete. Our findings are as follows:\n\n";
+    if ( $es == 1 ) {
+        print "Hola,\n\nLa evaluación inicial ha completado. Nuestros resultados son los siguientes:\n\n";
+    }
+    else {
+        print "Hi,\n\nThe pre migration server evaluation is complete. Our findings are as follows:\n\n";
+    }
 
     print_parsed_eula_info( $eula_accepted );
     print_parsed_php_info( $src_php, $dst_php );
