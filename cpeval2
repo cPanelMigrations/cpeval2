@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.14';
+my $version = '1.15';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -96,10 +96,17 @@ Case 72981: In _DEVEL as of March 26th, 2014.
 }
 
 sub print_news_da {
-#    print q{   !! DA BLOCKERS !!
-#    };
-#
-#    sleep 3;
+    print q{   !! DA BLOCKERS !!
+
+Case 97657: [DirectAdmin] SSL certificates are not installed
+
+    pkgacct-da doesn't appear to build the necessary userdata
+    for SSL certs to get installed. As such, certs may need to
+    be installed manually.
+
+    };
+
+    sleep 3;
 }
 
 
