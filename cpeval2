@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.15';
+my $version = '1.16';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -157,6 +157,7 @@ if ( !$infile ) {
     cpanel_eula_accepted_check();
     print_mysql_username_conflict_info();
     print_prefixed_openfileslimit();
+    print_prefixed_mysql_skip_networking();
 
 }
 ## parse output file; this prints info we can just copy/paste into the ticket
@@ -1424,6 +1425,23 @@ sub print_prefixed_openfileslimit {
     print $prefix . 'MYSQL_OPEN_FILES_LIMIT:' . $open_files_limit . "\n";
 }
 
+sub print_prefixed_mysql_skip_networking {
+    return if ( $is_cpanel == 0 );
+
+    my $my_cnf = '/etc/my.cnf';
+
+    if ( open my $my_cnf_fh, '<', $my_cnf ) {
+        while (<$my_cnf_fh>) {
+            chomp( my $line = $_ );
+            if ( $line =~ m{ \A (?:[ \t]+)? (skip[_-]net.*) }xms ) {
+                print $prefix . 'MYSQL_SKIP_NETWORKING:1' . "\n";
+                last;
+            }    
+        }    
+        close $my_cnf;
+    }    
+}
+
 sub print_plesk_duplicate_email_users {
     return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
 
@@ -1530,6 +1548,7 @@ sub parse_output_file {
     my ( $src_phpini_date_timezone, $dst_phpini_date_timezone );
     my ( @mysql_username_conflicts );
     my $open_files_limit;
+    my $skip_networking;
 
     open my $file_fh, '<', $file or die "Could not open $file: $!\n";
     while ( <$file_fh> ) {
@@ -1672,6 +1691,11 @@ sub parse_output_file {
         if ( m{ \A d:MYSQL_OPEN_FILES_LIMIT:(\d+)\z }xms ) {
             $open_files_limit = $1;
         }
+
+        ## mysql skip-networking check
+        if ( m{ \A d:MYSQL_SKIP_NETWORKING:1 \z }xms ) {
+            $skip_networking = 1;
+        }
     }
 
     close $file_fh;
@@ -1706,7 +1730,8 @@ sub parse_output_file {
                                $src_phpini_date_timezone, $dst_phpini_date_timezone
     );
     print_parsed_mysql_username_conflicts( @mysql_username_conflicts ) if @mysql_username_conflicts;
-    print_parsed_mysql_openfilesimit($open_files_limit);
+    print_parsed_mysql_openfileslimit($open_files_limit);
+    print_parsed_mysql_skip_networking( 1 );
 
 }
 
@@ -2280,7 +2305,7 @@ Como tal, tendrá que ser cambiado a algo único antes de que se pueden copiar l
     print_reseller_username_change_info();
 }
 
-sub print_parsed_mysql_openfilesimit {
+sub print_parsed_mysql_openfileslimit {
     my $open_files_limit = shift or return;
 
     if ( $open_files_limit < 10_000 ) {
@@ -2306,6 +2331,32 @@ Podemos aumentar el ajuste de open_files_limit para MySQL?
 [ ] SI [ ] NO
             };
         }
+    }
+}
+
+sub print_parsed_mysql_skip_networking {
+    my $skip_networking = shift;
+    return if !$skip_networking;
+
+    if ( $es == 0 ) {
+        print_header('MySQL skip-networking');
+        print qq{
+On the cPanel server, MySQL's skip-networking option is enabled. This can prevent databases
+from restoring properly. This option needs to be disabled throughout the migration process.
+
+May we disable MySQL's skip-networking setting on the cPanel server?
+
+[ ] YES  [ ] NO
+        };
+    }
+    else { # ES
+        print q{
+En el servidor de cPanel, está habilitada la opción skip-networking de MySQL. Esto puede impedir
+que las bases de datos restaurar adecuadamente. Esta opción debe deshabilitarse en todo el proceso de migración.
+
+¿Nos podemos desactivar a configuración skip-networking de MySQL en el servidor cPanel?
+[ ] SI  [ ] NO
+        };
     }
 }
 
