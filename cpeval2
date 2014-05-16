@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.17';
+my $version = '1.18';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -1731,7 +1731,7 @@ sub parse_output_file {
     );
     print_parsed_mysql_username_conflicts( @mysql_username_conflicts ) if @mysql_username_conflicts;
     print_parsed_mysql_openfileslimit($open_files_limit);
-    print_parsed_mysql_skip_networking( 1 );
+    print_parsed_mysql_skip_networking( $skip_networking );
 
 }
 
