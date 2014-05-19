@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.18';
+my $version = '1.19';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -1631,16 +1631,16 @@ sub parse_output_file {
         if ( m{ \A $panel_regex:TOMCAT:1 }xms ) {
             $src_tomcat = 1;
         }
-        if ( m{ \A d:TOMCAT:0 }xms ) {
-            $dst_tomcat = 0;
+        if ( m{ \A d:TOMCAT:1 }xms ) {
+            $dst_tomcat = 1;
         }
 
         ## ColdFusion check
         if ( m{ \A $panel_regex:COLDFUSION:1 }xms ) {
             $src_coldfusion = 1;
         }
-        if ( m{ \A d:COLDFUSION:0 }xms ) {
-            $dst_coldfusion = 0;
+        if ( m{ \A d:COLDFUSION:1 }xms ) {
+            $dst_coldfusion = 1;
         }
 
         ## Reseller duplicate username conflict
