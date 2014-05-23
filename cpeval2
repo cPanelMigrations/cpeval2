@@ -24,7 +24,7 @@ use strict;
 use warnings;
 use IPC::Open3;
 
-my $version = '1.19';
+my $version = '1.20';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -156,8 +156,9 @@ if ( !$infile ) {
     print_prefixed_php_information();
     cpanel_eula_accepted_check();
     print_mysql_username_conflict_info();
-    print_prefixed_openfileslimit();
+    print_prefixed_mysql_openfileslimit();
     print_prefixed_mysql_skip_networking();
+    print_prefixed_mysql_old_style_passwords_info();
 
 }
 ## parse output file; this prints info we can just copy/paste into the ticket
@@ -1416,7 +1417,7 @@ sub print_mysql_username_conflict_info {
     }
 }
 
-sub print_prefixed_openfileslimit {
+sub print_prefixed_mysql_openfileslimit {
     return if ( $is_cpanel == 0 );
 
     my $open_files_limit = `mysqladmin var | grep open_files_limit | awk '{print \$4}'`;
@@ -1435,6 +1436,26 @@ sub print_prefixed_mysql_skip_networking {
             chomp( my $line = $_ );
             if ( $line =~ m{ \A (?:[ \t]+)? (skip[_-]net.*) }xms ) {
                 print $prefix . 'MYSQL_SKIP_NETWORKING:1' . "\n";
+                last;
+            }    
+        }    
+        close $my_cnf;
+    }    
+}
+
+sub print_prefixed_mysql_old_style_passwords_info {
+    ## if the source is using old_passwords=1 and the cPanel server is using MySQL >= 5.6,
+    ## MySQL data may not restore properly
+
+    return if ( $is_cpanel == 1 );
+
+    my $my_cnf = '/etc/my.cnf';
+
+    if ( open my $my_cnf_fh, '<', $my_cnf ) {
+        while (<$my_cnf_fh>) {
+            chomp( my $line = $_ );
+            if ( $line =~ m{ \A (?:[ \t]+)? (old[_-]p.*=(?:[ \t]?)1) }xms ) {
+                print $prefix . 'MYSQL_OLD_STYLE_PASSWORDS:1' . "\n";
                 last;
             }    
         }    
@@ -1549,6 +1570,7 @@ sub parse_output_file {
     my ( @mysql_username_conflicts );
     my $open_files_limit;
     my $skip_networking;
+    my $mysql_old_style_passwords;
 
     open my $file_fh, '<', $file or die "Could not open $file: $!\n";
     while ( <$file_fh> ) {
@@ -1696,6 +1718,10 @@ sub parse_output_file {
         if ( m{ \A d:MYSQL_SKIP_NETWORKING:1 \z }xms ) {
             $skip_networking = 1;
         }
+
+        if ( m{ \A $panel_regex:MYSQL_OLD_STYLE_PASSWORDS:1 \z }xms ) {
+            $mysql_old_style_passwords = 1;
+        }
     }
 
     close $file_fh;
@@ -1732,6 +1758,7 @@ sub parse_output_file {
     print_parsed_mysql_username_conflicts( @mysql_username_conflicts ) if @mysql_username_conflicts;
     print_parsed_mysql_openfileslimit($open_files_limit);
     print_parsed_mysql_skip_networking( $skip_networking );
+    print_parsed_mysql_old_style_passwords_info( $dst_mysql, $mysql_old_style_passwords );
 
 }
 
@@ -2031,7 +2058,7 @@ When renaming the users, please use the following guidelines:
 
 sub print_username_change_info_ES { #ES
     print q{
-Cuando cambie el nombre de los usuarios, por favor siga las siguientes directivas:\n";
+Cuando cambie el nombre de los usuarios, por favor siga las siguientes directivas:
 
 * Utilice solamente letras (solamente minúsculas), y números
 * Nombres de usuario no pueden comenzar con un número o con el string "test"
@@ -2366,6 +2393,42 @@ que las bases de datos se puedan restaurar correctamente. Esta opción debe ser 
     }
 }
 
+sub print_parsed_mysql_old_style_passwords_info {
+    my ( $cpanel_mysql_version, $mysql_old_style_passwords ) = @_;
+    $cpanel_mysql_version =~ s/\.//g;
+    $cpanel_mysql_version = substr $cpanel_mysql_version, 0, 2;
+
+    if ( $mysql_old_style_passwords == 1 and $cpanel_mysql_version >= 56 ) {
+        if ( $es == 0 ) {
+            print_header('MySQL 5.6 and old-passwords=1');
+            print qq{
+The ${src_panel_noversion} server is using the "old-passwords=1" option. However, the cPanel server
+is using MySQL 5.6. These are not compatible. The only known workarounds at this time are:
+
+1) Set up a cPanel server with MySQL 5.1 or 5.5, OR
+
+2) Disable the old-passwords=1 option for MySQL on the ${src_panel_noversion} server and reapply
+all of the MySQL users' passwords. Then verify in the mysql.user contains the new style passwords
+for each user.
+            };
+        }
+        else {
+            print_header('MySQL 5.6 y old-passwords=1');
+            print qq{
+El servidor ${src_panel_noversion} está utilizando la opción "old-passwords=1". Sin embargo,
+el servidor cPanel esta usando MySQL 5.6. Estos no son compatibles. Las soluciones conocidas
+solamente en este momento son:
+
+1) Configurar un servidor cPanel con MySQL 5.1 o 5.5, o
+
+2) Deshabilitar los old-passwords=1 opción para MySQL en el servidor ${src_panel_noversion}
+y vuelva a aplicar todas las contraseñas de los usuarios MySQL. Compruebe en el mysql.user contiene
+las nuevas contraseñas de estilo para cada usuario.
+            };
+        }
+    }
+}
+
 sub print_parsed_phpini_items {
     my ( $src_phpini_memory_limit, $dst_phpini_memory_limit,
          $src_phpini_post_max_size, $dst_phpini_post_max_size,
@@ -2444,12 +2507,9 @@ Would you like us to modify php.ini on the cPanel server to use the same configu
             print qq{
 Hemos revisado varias de las opciones de configuración más comúnmente personalizados en php.ini y encontramos algunas diferencias.
 
-
 Para asegurarse de que las aplicaciones PHP funcionan correctamente en el servidor de cPanel, se recomienda que los ajustes sean los mismos en ambos servidores.
 
-
 Las diferencias encontradas se enumeran a continuación:
-
 
 $addendum
 
