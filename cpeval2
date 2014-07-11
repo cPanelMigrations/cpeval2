@@ -23,8 +23,9 @@ When run WITH an input file (e.g., ./cpeval2 outfile):
 use strict;
 use warnings;
 use IPC::Open3;
+use IO::Socket::INET;
 
-my $version = '1.22';
+my $version = '1.23';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -72,6 +73,121 @@ my @badusers;               # if mysql username conflicts are detected, skip any
 get_control_panel_and_set_prefix();
 check_for_empty_trueuserdomains();
 verify_mysql_connectivity();
+
+## behave like the original cpeval
+if ( !$infile ) {
+    if ( ! -f '/etc/trueuserdomains' or ! -f '/etc/domainips' ) { 
+        print "/etc/trueuserdomains OR /etc/domainips missing!\n";
+        print "Use 'Fetch Accounts List' to generate them.\n";
+        exit;
+    }
+
+    print_control_panel_info();
+    print_os_info();
+    print_perl_info();
+    print_mysql_info();
+    print_php_info();
+    print_apache_info();
+    print_mem_info();
+    print_number_of_accounts();
+    print_dedicated_ipaddrs();
+    print_mysql_db_count();
+    print_postgres_db_count();
+    check_destination_var_usage();
+    print_duplicate_usernames();
+    print_custom_apache_modules();
+    print_custom_php_modules();
+    print_htype_fwd();
+    print_htype_none();
+    print_plesk_duplicate_email_users(); # case 75913 - [Plesk] Copy email accounts with uppercase chars as all lowercase if a matching account does not already exist
+    print_reseller_username_conflicts(); # case 76677 - [Plesk] If a reseller has a domain, copy it instead of making a "psa-reseller-$cpuser.invalid" domain
+
+    print '-' x 40 . "\n";
+
+    print_prefixed_panel_info();
+    print_prefixed_php_info();
+    print_prefixed_mysql_info();
+    print_prefixed_bad_username_info(); # this sub MUST come before print_mysql_username_conflict_info();
+    print_prefixed_dedicated_ip_addr_info();
+    print_prefixed_hosting_types();
+    print_prefixed_tomcat_info();
+    print_prefixed_coldfusion_info();
+    print_prefixed_reseller_username_conflicts();
+    print_prefixed_user_config_problems();
+    print_prefixed_php_information();
+    cpanel_eula_accepted_check();
+    print_mysql_username_conflict_info();
+    print_prefixed_mysql_openfileslimit();
+    print_prefixed_mysql_skip_networking();
+    print_prefixed_mysql_old_style_passwords_info();
+
+}
+## parse output file; this prints info we can just copy/paste into the ticket
+else {
+    parse_output_file( $infile );
+}
+
+unless ( $infile ) {
+    print_header('DISK SPACE');
+    print "Please review this output now, compare with the output from the other server, and check for possible issues:\n\n";
+    print `df -Ph | column -t | head -1 ; df -Ph | column -t | sort | uniq | egrep -v '^Filesystem|/var/named/run-root/var/run/dbus|/var/named/chroot|/usr/local/psa/handlers/|/virtfs/| /tmp\$'`;
+    print "\nA few things to keep in mind are:\n";
+    print "  * pkgacct-* packages accounts in /home . Is /home on /, or is it separate?\n";
+    print "  * Need to change the partition that accounts are packaged to? Check the 'MigrationsReference' article\n";
+    print "  * Is more space being used on the source than what is available on the destination?\n";
+    print "  * If there's, say, 50GB free on the source, the largest account that can be copied is a little less than 25GB (half of 50)\n";
+
+    if ( $is_plesk == 1 ) {
+        print "  * Plesk stores users' data under /var [ /var/www/vhosts/\${DOMAIN}/ ] [ /var/qmail/mailnames/\${DOMAIN}/ ] [ /var/lib/mysql ]\n";
+        if ( $^O =~ /freebsd/i ) {
+            print "  * commonly, customers with FreeBSD will have different locations for their services\n" .
+                  "  * if pkgacct fails to find the locations of the user's data, you will need to get the locations of the data from /etc/psa/psa.conf, then create directories and symlinks so pkgacct can package correctly\n" .
+                  "  * variables to grep for in the psa.conf are HTTPD_VHOSTS_D, QMAIL_MAILNAMES_D, MYSQL_VAR_D, PGSQL_DATA_D\n";
+        }
+    }
+}
+
+if ( $is_cpanel == 1 and -f '/var/cpanel/transfers_devel' ) {
+    print "\n\n!! /var/cpanel/transfers_devel exists! Server may be using _DEVEL migrations scripts !!\n";
+}
+
+# for libkeyutils malware migrations
+if ( $is_cpanel == 1 ) {
+    check_for_ssl_certificates();
+    check_for_dns_clustering();
+}
+
+unless ( $infile ) {
+    if ( $is_cpanel == 1 ) {
+        my $mailutil_missing_libs = 0; 
+
+        if ( -e '/usr/bin/ldd' and -x '/usr/bin/ldd' ) {
+            if ( my @ldd_mailutil = `ldd /usr/local/cpanel/Whostmgr/Pkgacct/3rdparty/mbx2mbox/mailutil` ) {
+                for my $line (@ldd_mailutil) {
+                    chomp $line;
+                    if ( $line =~ /not found/ ) {
+                        $mailutil_missing_libs = 1; 
+                    }    
+                }    
+
+                if ( $mailutil_missing_libs == 1 ) {
+                    print_header('Ensim');
+                    print "/u/l/c/Whostmgr/Pkgacct/3rdparty/mbx2mbox/mailutil is missing libs (use 'ldd' to see which are missing)\n";
+                    print "Copying accounts from Ensim? Check FB 72981 first! Email may not get copied properly otherwise.\n";
+                }    
+            }
+        }
+    }    
+}
+
+
+show_ftp_accounts();
+
+submit_stats_info();
+
+
+##########
+
 
 sub version_cmp { # should only be used by version_compare()
     my ( $parent1, $major1, $minor1, $build1 ) = split /[\._]/, $_[0];
@@ -153,59 +269,6 @@ Case 97657: [DirectAdmin] SSL certificates are not installed
 sub mysql_test {
     my $mysql_output = `mysql -e 'select 1' 2>&1`;
     return $mysql_output;
-}
-
-## behave like the original cpeval
-if ( !$infile ) {
-    if ( ! -f '/etc/trueuserdomains' or ! -f '/etc/domainips' ) { 
-        print "/etc/trueuserdomains OR /etc/domainips missing!\n";
-        print "Use 'Fetch Accounts List' to generate them.\n";
-        exit;
-    }
-
-    print_control_panel_info();
-    print_os_info();
-    print_perl_info();
-    print_mysql_info();
-    print_php_info();
-    print_apache_info();
-    print_mem_info();
-    print_number_of_accounts();
-    print_dedicated_ipaddrs();
-    print_mysql_db_count();
-    print_postgres_db_count();
-    check_destination_var_usage();
-    print_duplicate_usernames();
-    print_custom_apache_modules();
-    print_custom_php_modules();
-    print_htype_fwd();
-    print_htype_none();
-    print_plesk_duplicate_email_users(); # case 75913 - [Plesk] Copy email accounts with uppercase chars as all lowercase if a matching account does not already exist
-    print_reseller_username_conflicts(); # case 76677 - [Plesk] If a reseller has a domain, copy it instead of making a "psa-reseller-$cpuser.invalid" domain
-
-    print '-' x 40 . "\n";
-
-    print_prefixed_panel_info();
-    print_prefixed_php_info();
-    print_prefixed_mysql_info();
-    print_prefixed_bad_username_info(); # this sub MUST come before print_mysql_username_conflict_info();
-    print_prefixed_dedicated_ip_addr_info();
-    print_prefixed_hosting_types();
-    print_prefixed_tomcat_info();
-    print_prefixed_coldfusion_info();
-    print_prefixed_reseller_username_conflicts();
-    print_prefixed_user_config_problems();
-    print_prefixed_php_information();
-    cpanel_eula_accepted_check();
-    print_mysql_username_conflict_info();
-    print_prefixed_mysql_openfileslimit();
-    print_prefixed_mysql_skip_networking();
-    print_prefixed_mysql_old_style_passwords_info();
-
-}
-## parse output file; this prints info we can just copy/paste into the ticket
-else {
-    parse_output_file( $infile );
 }
 
 sub print_header {
@@ -2220,7 +2283,7 @@ Cuando cambie el nombre de los usuarios, por favor siga las siguientes directiva
     if ( $src_panel_noversion =~ /Plesk/ ) {
         print q{
 Usted puede cambiar los nombres de los usuarios siguiendo las siguiente instrucciones:
-        };
+};
 
         if ( $src_panel eq 'Plesk8' ) {
             print q{
@@ -2291,7 +2354,8 @@ sub print_parsed_ipaddr_info {
             print_header('IP Addresses');
             print qq{
 On the $src_panel_noversion server, the following sites are on dedicated IP addresses:
-            };
+
+};
         }
         else { #ES
             print_header('Direcciones IP');
@@ -2351,7 +2415,7 @@ sub print_parsed_forwarding_domain_info {
 We cannot transfer the following forwarding domains, as they are not hosting accounts.
 You can add them in WHM >> Setup/Edit Domain Forwarding (this requires just 1 additional IP address on the cPanel server if one does not exist already):
 
-        };
+};
     }
     else { #ES
         print_header('Dominios reenviar');
@@ -2359,7 +2423,8 @@ You can add them in WHM >> Setup/Edit Domain Forwarding (this requires just 1 ad
         print q{
 No podemos transferir los siguientes forwarding domains, ya que no son cuentas de hosting.
 Usted puede añadirlos en WHM >> Setup/Edit Domain Forwarding (esto requiere sólo 1 dirección IP adicional en el servidor de cPanel si es que uno no existe):
-        };
+
+};
     }
 
     print "\n";
@@ -2385,7 +2450,7 @@ The following are domains that we have found that do not have a hosting plan.
 The cPanel & WHM transfer tools will not be able to transfer these domains.
 In order to make them compatible with the transfer tools, please add hosting to these domains:
 
-        };
+};
     }
     else { #ES
         print_header('Dominios sin hosting');
@@ -2393,7 +2458,8 @@ In order to make them compatible with the transfer tools, please add hosting to 
 Los siguientes son dominios que hemos encontrado que no tienen un plan de hosting.
 Las herramientas de transferencia de cPanel y WHM no serán capaces de transferir estos dominios.
 Con el fin de hacerlos compatibles con las herramientas de transferencia, por favor agregue un plan de hosting a estos dominios:
-        };
+
+};
     }
 
     print "\n";
@@ -2479,7 +2545,7 @@ Plesk allows duplicate usernames for resellers and system accounts, while cPanel
 
 As such, the following usernames will need to be renamed to something unique before they can be copied:
 
-        };
+};
     }
     else { #ES
         print_header('Conflictos de Nombre de usuarios de revendedores');
@@ -2488,7 +2554,8 @@ As such, the following usernames will need to be renamed to something unique bef
 Plesk permite los nombres de usuario duplicados para los revendedores y las cuentas del sistema, mientras que cPanel no lo hace.
 
 Como tal, tendrá que ser cambiado a algo único antes de que se pueden copiar los siguientes nombres de usuario:
-        };
+
+};
     }
 
     for my $reseller (@reseller_username_conflicts) {
@@ -2729,36 +2796,6 @@ sub print_htype_none {
     }
 }
 
-unless ( $infile ) {
-    print_header('DISK SPACE');
-    print "Please review this output now, compare with the output from the other server, and check for possible issues:\n\n";
-    print `df -Ph | column -t | head -1 ; df -Ph | column -t | sort | uniq | egrep -v '^Filesystem|/var/named/run-root/var/run/dbus|/var/named/chroot|/usr/local/psa/handlers/|/virtfs/| /tmp\$'`;
-    print "\nA few things to keep in mind are:\n";
-    print "  * pkgacct-* packages accounts in /home . Is /home on /, or is it separate?\n";
-    print "  * Need to change the partition that accounts are packaged to? Check the 'MigrationsReference' article\n";
-    print "  * Is more space being used on the source than what is available on the destination?\n";
-    print "  * If there's, say, 50GB free on the source, the largest account that can be copied is a little less than 25GB (half of 50)\n";
-
-    if ( $is_plesk == 1 ) {
-        print "  * Plesk stores users' data under /var [ /var/www/vhosts/\${DOMAIN}/ ] [ /var/qmail/mailnames/\${DOMAIN}/ ] [ /var/lib/mysql ]\n";
-        if ( $^O =~ /freebsd/i ) {
-            print "  * commonly, customers with FreeBSD will have different locations for their services\n" .
-                  "  * if pkgacct fails to find the locations of the user's data, you will need to get the locations of the data from /etc/psa/psa.conf, then create directories and symlinks so pkgacct can package correctly\n" .
-                  "  * variables to grep for in the psa.conf are HTTPD_VHOSTS_D, QMAIL_MAILNAMES_D, MYSQL_VAR_D, PGSQL_DATA_D\n";
-        }
-    }
-}
-
-if ( $is_cpanel == 1 and -f '/var/cpanel/transfers_devel' ) {
-    print "\n\n!! /var/cpanel/transfers_devel exists! Server may be using _DEVEL migrations scripts !!\n";
-}
-
-# for libkeyutils malware migrations
-if ( $is_cpanel == 1 ) {
-    check_for_ssl_certificates();
-    check_for_dns_clustering();
-}
-
 sub check_for_ssl_certificates {
     print_header("SSL (for libkeyutils migrations. Ignore any output above\nabout SSL certificates if this is the destination server)");
 
@@ -2824,7 +2861,8 @@ sub check_for_dns_clustering {
 The following cluster members were found to be configured on this server
 (note: the reverse trust relationship is not known, and would need to be
 determined by logging into WHM on the cluster server and checking it there):
-        };
+
+};
     }
     else { #ES
     }
@@ -2890,31 +2928,6 @@ determined by logging into WHM on the cluster server and checking it there):
     }
 }
 
-unless ( $infile ) {
-    if ( $is_cpanel == 1 ) {
-        my $mailutil_missing_libs = 0; 
-
-        return if !-e '/usr/bin/ldd' and !-x '/usr/bin/ldd';
-        my @ldd_mailutil = `ldd /usr/local/cpanel/Whostmgr/Pkgacct/3rdparty/mbx2mbox/mailutil`;
-        return if !@ldd_mailutil;
-        for my $line (@ldd_mailutil) {
-            chomp $line;
-            if ( $line =~ /not found/ ) {
-                $mailutil_missing_libs = 1; 
-            }    
-        }    
-
-        if ( $mailutil_missing_libs == 1 ) {
-            print_header('Ensim');
-            print "/u/l/c/Whostmgr/Pkgacct/3rdparty/mbx2mbox/mailutil is missing libs (use 'ldd' to see which are missing)\n";
-            print "Copying accounts from Ensim? Check FB 72981 first! Email may not get copied properly otherwise.\n";
-        }    
-    }    
-}
-
-
-show_ftp_accounts();
-
 sub show_ftp_accounts {
     return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
     return if ( $plesk_major_version < 10 );
@@ -2957,7 +2970,7 @@ sub print_parsed_mysql_username_conflicts {
         print qq{
 mysql username conflicts have been found. To fix, please rename the user(s) specified below:
 
-        };
+};
     }
     else { #ES
         print_header('conflictos de nombre de usuario mysql');
@@ -2982,4 +2995,68 @@ mysql username conflicts have been found. To fix, please rename the user(s) spec
     else {
         print_username_change_info_ES();
     }
+}
+
+sub submit_stats_info {
+    return if ! ( $src_panel_version || $dst_panel_version );
+    my ($panelname, $panelver, $account_num, $RETURN, $status) = ();
+    my $submit_host = 'qs.tech.cpanel.net';
+
+    if ( $src_panel_version ) {
+        ($panelname, $panelver) = split(/\s/, $src_panel_version);
+    }
+    if ( $dst_panel_version ) {
+        ($panelname, $panelver) = split(/\s/, $dst_panel_version);
+    }
+
+    return if ! ( $panelname =~ /Plesk|Ensim|DirectAdmin/ );
+
+    my ($panelmajor, $panelminor) = split(/\./, $panelver);
+    return if ! ($panelmajor =~ /^\d+$/);
+    $panelminor = $panelminor ? $panelminor : '0';
+
+    if ( -f '/etc/trueuserdomains' ) { 
+        chomp( $account_num = `sort -u /etc/trueuserdomains | wc -l` );
+    }   
+
+    if ( ! $account_num =~ /^\d+$/ ) {
+        $account_num = '0';
+    }
+
+    my $submit = "panelname=" . $panelname . "&panelver=" . $panelmajor . "." . $panelminor . "&numaccount=" . $account_num;
+    my $header = "GET /submit.cgi?" . $submit . " HTTP/1.1\r\nHost: " . $submit_host . "\r\n\r\n";
+    
+    print "\nSubmitting panel stats info... (" . $submit . ")\n";
+    local $SIG{'ALRM'} = sub { print "Submit time-out.\n"; return (); };
+    alarm 10;
+
+    my $sock = IO::Socket::INET->new(
+        PeerAddr => $submit_host,
+        PeerPort => '80',
+        Proto    => 'tcp',
+        Timeout  => 5,
+    );
+
+    if ($sock) {
+        print $sock $header;
+        sysread $sock, $RETURN, 1000;
+        close $sock;
+    }
+
+    alarm 0;
+
+    for ( split /\n/, $RETURN ) {
+        if ( /200 OK/ ) {
+            $status = 'Submission successful.';
+        }
+        if ( /400 Bad Request/ ) {
+            $status = 'WARNING: Submission attempt returned "400 Bad Request".  Please contact ssp-request@cpanel.net with this ticket ID and paste the stats submission output into the notes.';
+        }
+        if ( /401 Duplicate Entry/ ) {
+            $status = 'Not submitted due to existing entry (this is OK).';
+        }
+    }
+    $status = $status ? $status : 'Submission returned unknown status.';
+    print $status . "\n";
+
 }
