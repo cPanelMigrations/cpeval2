@@ -25,7 +25,7 @@ use warnings;
 use IPC::Open3;
 use IO::Socket::INET;
 
-my $version = '1.23';
+my $version = '1.24';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -630,8 +630,8 @@ $str1, ':', $str2
         
 
 sub print_perl_info {
-    my $perl_version = `perl -v`;
-    if ( $perl_version =~ /This is perl, v(\S+) / ) {
+    my $perl_version = $^V;
+    if ( $perl_version =~ /^v(.+)$/ ) {
         $perl_version = $1;
     }
 
@@ -1561,7 +1561,9 @@ sub print_mysql_username_conflict_info {
 
 sub print_prefixed_mysql_openfileslimit {
     return if ( $is_cpanel == 0 );
-    return if ( version_compare( $cpanel_version, qw( >= 11.44.0.0 ) ) ); # open_files_limit is auto-scaled during restore in 11.44+
+# open_files_limit is auto-scaled with the Transfer Tool in 11.44+, but not when using /scripts/restorepkg
+# I want to re-enable this in the future if restorepkg is fixed to do this, but for now we need to keep checking.
+#    return if ( version_compare( $cpanel_version, qw( >= 11.44.0.0 ) ) );
 
     my $open_files_limit = `mysqladmin var | grep open_files_limit | awk '{print \$4}'`;
     chomp $open_files_limit;
