@@ -25,7 +25,7 @@ use warnings;
 use IPC::Open3;
 use IO::Socket::INET;
 
-my $version = '1.24';
+my $version = '1.25';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -236,33 +236,19 @@ sub print_news_plesk {
 }
 
 sub print_news_ensim {
-    my $arch = qx{ arch };
-    chomp $arch;
-    return if $arch ne 'x86_64';
-
     print q{   !! ENSIM BLOCKERS !!
 
-Case 72981: In _DEVEL as of March 26th, 2014.
-
-!! USE _DEVEL !!
-
+Case 107517: Check to see if this case is resolved and published to _DEVEL or _PUBLIC, if not, you may not be able to use Transfer Tool or cpmig.sh and must perform a manual migration.
     };
 
     sleep 3;
 }
 
 sub print_news_da {
-    print q{   !! DA BLOCKERS !!
-
-Case 97657: [DirectAdmin] SSL certificates are not installed
-
-    pkgacct-da doesn't appear to build the necessary userdata
-    for SSL certs to get installed. As such, certs may need to
-    be installed manually.
-
-    };
-
-    sleep 3;
+#    print q{   !! DA BLOCKERS !!
+#    };
+#
+#    sleep 3;
 }
 
 
@@ -630,23 +616,21 @@ $str1, ':', $str2
         
 
 sub print_perl_info {
-    my $perl_version = $^V;
-    if ( $perl_version =~ /^v(.+)$/ ) {
-        $perl_version = $1;
+    # Previously read in output from 'perl -v', then tried to use $^V, but these proved to be unreliable.
+    my $perl_version = $];
+    if ( $perl_version && $perl_version =~ /^(\d+)\.(\d{3})(\d{3})/ ) {
+        $perl_version = join ('.', ($1 + 0), ($2 + 0), ($3 + 0));
     }
 
     if ( !$perl_version ) {
         $perl_version = 'Unknown';
     }
     else {
-        my $perl_version_tmp = $perl_version;
-        $perl_version_tmp =~ s/\.//g;
-        if ( $perl_version_tmp <= 562 ) {
+        if ( version_compare( $perl_version, qw( < 5.6.2.0 ) ) ) {
             $perl_version = $perl_version . ' [ PERL MUST BE 5.6.2+ ]';
         }
     }
 
-#    print 'Perl: ' . "$perl_version\n";
     print_format( 'Perl', $perl_version );
 }
 
@@ -1205,49 +1189,36 @@ sub print_custom_php_modules {
     }
 }
 
-sub print_duplicate_usernames {
-    return if $is_ensim == 0;
-
-    my $result;
+sub print_duplicate_usernames { # And non-unique first 8 characters as required by WHM 11.44+
     if ( -f "/etc/trueuserdomains" ) {
-        my $userdoms;
+        my %user = ();
+        my @dupes = ();
         open( FILE, "/etc/trueuserdomains" );
         while (<FILE>) {
-            $userdoms .= $_;
-        }
-        close(FILE);
-        my @list = split( "\n", $userdoms );
-
-        my %domaincount;
-        for my $domainline (@list) {
-            $domainline =~ m/[^:]+: ([^^]+)\^/;
-            my $user = $1;
-            $domaincount{$user}++;
-        }
-
-        for my $user ( keys %domaincount ) {
-            if ( $domaincount{$user} > 1 ) {
-
-                #  $result .= " $user (".$domaincount{$user}.")\n";
-                my @duplicate_users = map { ' ' . $_ } grep { $_ =~ /: $user\^/ } @list;
-                $result .= join( "\n", @duplicate_users );
+            chomp; 
+            if ( m/[^:]+: ([^^\s]+)(?:\^|\s*|$)/ ) {
+                $user{$1}{$_} = 1;
+                my $first8 = substr( $1, 0, 8 );
+                next if $1 eq $first8;
+                $user{$first8 . " (first 8)"}{$_} = 1;
             }
         }
+        close(FILE);
 
-        return if !$result;
-
-        if ( !$result ) {
-            $result = " -None-\n";
+        for (sort(keys %user)) {
+            next if scalar (keys(%{$user{$_}})) <= 1;            
+            push @dupes, " " x 4 . $_ . ":\n" . " " x 8 . join("\n" . " " x 8, sort(keys(%{$user{$_}})));
         }
 
-        # Line pad
-        $result .= "\n";
+        return if scalar @dupes < 1;
+
+        print "\nDuplicate usernames, or whose first 8 characters are not unique:\n";
+        print join("\n", @dupes);
+        print "\n";
     }
     else {
         die("/etc/trueuserdomains missing!");
     }
-
-    print "Duplicate Usernames:\n" . "$result";
 }
 
 sub _find_bin {
@@ -1447,11 +1418,7 @@ sub print_prefixed_user_config_problems {
 }
 
 sub print_prefixed_php_information {
-    my $phpini;
-    my $memory_limit;
-    my $post_max_size;
-    my $upload_max_filesize;
-    my $date_timezone;
+    my ( $phpini, $memory_limit, $post_max_size, $upload_max_filesize, $date_timezone, $output_buffering ) = (undef) x 6;
 
     if ( $is_plesk == 1 or $is_plesk_smb10 == 1 or $is_ensim == 1 ) {
         $phpini = '/etc/php.ini';
@@ -1479,6 +1446,10 @@ sub print_prefixed_php_information {
         if ( $line =~ m{ \A date\.timezone (?:\s+)? = (?:\s+)? (?:["'])? ([^/"']+) / ([^/"']+) (?:["'])? (?:\s+)? \z }xms ) {
             $date_timezone = $1 . '/' . $2;
             print $prefix . 'PHPINI_DATE_TIMEZONE:' . $date_timezone . "\n";
+        }
+        if ( $line =~ m{ \A \s* output_buffering \s* = ["'\s]* ([^"'\s]+) ['"\s]* \z }xms ) {
+            $output_buffering = $1;
+            print $prefix . 'PHPINI_OUTPUT_BUFFERING:' . $output_buffering . "\n";
         }
     }
     close $file_fh;
@@ -1713,6 +1684,7 @@ sub parse_output_file {
     my ( $src_phpini_post_max_size, $dst_phpini_post_max_size );
     my ( $src_phpini_upload_max_filesize, $dst_phpini_upload_max_filesize );
     my ( $src_phpini_date_timezone, $dst_phpini_date_timezone );
+    my ( $src_phpini_output_buffering, $dst_phpini_output_buffering );
     my ( @mysql_username_conflicts );
     my $open_files_limit;
     my $skip_networking;
@@ -1859,6 +1831,13 @@ sub parse_output_file {
             $dst_phpini_date_timezone = $1;
         }
 
+        if ( m{ \A $panel_regex:PHPINI_OUTPUT_BUFFERING:(.*) }xms ) {
+            $src_phpini_output_buffering = $1;
+        }    
+        elsif ( m{ \A d:PHPINI_OUTPUT_BUFFERING:(.*) }xms ) {
+            $dst_phpini_output_buffering = $1;
+        }
+
         ## EULA check
         if ( m{ \A d:EULA:(\d) }xms ) {
             $eula_accepted = $1;
@@ -1915,7 +1894,8 @@ sub parse_output_file {
     print_parsed_phpini_items( $src_phpini_memory_limit, $dst_phpini_memory_limit,
                                $src_phpini_post_max_size, $dst_phpini_post_max_size,
                                $src_phpini_upload_max_filesize, $dst_phpini_upload_max_filesize,
-                               $src_phpini_date_timezone, $dst_phpini_date_timezone
+                               $src_phpini_date_timezone, $dst_phpini_date_timezone,
+                               $src_phpini_output_buffering, $dst_phpini_output_buffering
     );
     print_parsed_mysql_username_conflicts( @mysql_username_conflicts ) if @mysql_username_conflicts;
     print_parsed_mysql_openfileslimit($open_files_limit);
@@ -2665,7 +2645,8 @@ sub print_parsed_phpini_items {
     my ( $src_phpini_memory_limit, $dst_phpini_memory_limit,
          $src_phpini_post_max_size, $dst_phpini_post_max_size,
          $src_phpini_upload_max_filesize, $dst_phpini_upload_max_filesize,
-         $src_phpini_date_timezone, $dst_phpini_date_timezone
+         $src_phpini_date_timezone, $dst_phpini_date_timezone,
+         $src_phpini_output_buffering, $dst_phpini_output_buffering
     ) = @_;
 
     my $addendum;
@@ -2676,8 +2657,8 @@ sub print_parsed_phpini_items {
             $addendum .= qq{
 memory_limit:
 
-    ${src_panel_noversion}: ${src_phpini_memory_limit}M\n    cPanel: ${dst_phpini_memory_limit}M
-
+    ${src_panel_noversion}: ${src_phpini_memory_limit}M
+    cPanel: ${dst_phpini_memory_limit}M
             };
         }
     }
@@ -2689,7 +2670,6 @@ post_max_size:
 
     ${src_panel_noversion}: ${src_phpini_post_max_size}M
     cPanel: ${dst_phpini_post_max_size}M
-
             };
         }
     }
@@ -2712,6 +2692,17 @@ date.timezone:
 
     ${src_panel_noversion}: ${src_phpini_date_timezone}
     cPanel: ${dst_phpini_date_timezone}
+            };
+        }
+    }
+
+    if ( $src_phpini_output_buffering and $dst_phpini_output_buffering ) {
+        if ( $src_phpini_output_buffering ne $dst_phpini_output_buffering ) {
+            $addendum .= qq{
+output_buffering:
+
+    ${src_panel_noversion}: ${src_phpini_output_buffering}
+    cPanel: ${dst_phpini_output_buffering}
             };
         }
     }
@@ -3001,7 +2992,7 @@ mysql username conflicts have been found. To fix, please rename the user(s) spec
 
 sub submit_stats_info {
     return if ! ( $src_panel_version || $dst_panel_version );
-    my ($panelname, $panelver, $account_num, $RETURN, $status) = ();
+    my ($panelname, $panelver, $account_num, $RETURN, $status) = (undef) x 5;
     my $submit_host = 'qs.tech.cpanel.net';
 
     if ( $src_panel_version ) {
@@ -3019,9 +3010,12 @@ sub submit_stats_info {
 
     if ( -f '/etc/trueuserdomains' ) { 
         chomp( $account_num = `sort -u /etc/trueuserdomains | wc -l` );
-    }   
+    }
 
-    if ( ! $account_num =~ /^\d+$/ ) {
+    if ( $account_num && $account_num =~ /(\d+)/ ) {
+        $account_num = $1;
+    }
+    else {
         $account_num = '0';
     }
 
@@ -3047,18 +3041,29 @@ sub submit_stats_info {
 
     alarm 0;
 
+    $RETURN = $RETURN ? $RETURN : '';
+
     for ( split /\n/, $RETURN ) {
-        if ( /200 OK/ ) {
-            $status = 'Submission successful.';
+        tr/\r//d;
+        tr/\n//d;
+        if ( m{^HTTP/[^ ]+ (2\d\d.*)$} ) {
+            $status = 'Submission successful (' . $1 . ')';
+            last;
         }
-        if ( /400 Bad Request/ ) {
-            $status = 'WARNING: Submission attempt returned "400 Bad Request".  Please contact ssp-request@cpanel.net with this ticket ID and paste the stats submission output into the notes.';
+        if ( m{^HTTP/[^ ]+ (401.*)$} ) {
+            $status = 'Submission is a duplicate (' . $1 . '). This is OK.';
+            last;
         }
-        if ( /401 Duplicate Entry/ ) {
-            $status = 'Not submitted due to existing entry (this is OK).';
+        if ( m{^HTTP/[^ ]+ (400.*)$} ) {
+            $status = 'WARNING: Submission attempt failed (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
+            last;
+        }
+        if ( m{^HTTP/[^ ]+ (.*)$} ) {
+            $status = 'Submission returned unknown status (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
+            last;
         }
     }
-    $status = $status ? $status : 'Submission returned unknown status.';
+    $status = $status ? $status : 'Submission did not return any status code!  Blocked by firewall?';
     print $status . "\n";
 
 }
