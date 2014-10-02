@@ -25,7 +25,7 @@ use warnings;
 use IPC::Open3;
 use IO::Socket::INET;
 
-my $version = '1.25';
+my $version = '1.26';
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
@@ -88,6 +88,7 @@ if ( !$infile ) {
     print_mysql_info();
     print_php_info();
     print_apache_info();
+    print_cpu_info();
     print_mem_info();
     print_number_of_accounts();
     print_dedicated_ipaddrs();
@@ -185,6 +186,7 @@ show_ftp_accounts();
 
 submit_stats_info();
 
+check_for_missing_scp();
 
 ##########
 
@@ -712,6 +714,47 @@ sub print_apache_info {
     print_format( 'Apache', $apache_version );
 }
 
+sub mem_rounded {
+    my ($mem_size) = @_;
+    my $chip_size  = 1;
+    my $chip_guess = ($mem_size / 8) - 1;
+    while ($chip_guess != 0) {
+        $chip_guess >>= 1;
+        $chip_size  <<= 1;
+    }
+    my $mem_round = (int($mem_size / $chip_size) + 1) * $chip_size;
+    return $mem_round;
+}
+
+sub print_cpu_info {
+    my ($model, $mhz) = ();
+    my $numcores = 0;
+    if ( open my $cpuinfo_fh, '<', '/proc/cpuinfo' ) {
+        for my $line ( readline $cpuinfo_fh ) {
+            if ( $line =~ /^model name/m ) {
+                $line =~ s/^model name\s+:\s+//;
+                $line =~ s/\(R\)//g;
+                $line =~ s/\(tm\)//g;
+                $line =~ s/\s{2,}/ /;
+                $line =~ s/\s*\@/ \@/;
+                $model = $line;
+                chomp $model;
+                $numcores++;
+            }
+            if ( $line =~ /^cpu MHz/m ) {
+                $line =~ s/^cpu MHz\s+:\s+//;
+                $mhz = $line;
+                chomp $mhz;
+            }
+        }
+        close $cpuinfo_fh;
+    }
+    else {
+        return;
+    }
+    print_format( 'CPU', $model . ' w/ ' . $numcores . ' cores' );
+}
+
 sub print_mem_info {
     if ( $^O =~ /freebsd/i ) { 
         my $sysctl        = {}; 
@@ -722,7 +765,7 @@ sub print_mem_info {
             }
         }
 
-        my $mem_hw       = &mem_rounded( $sysctl->{"hw.physmem"} );
+        my $mem_hw       = mem_rounded( $sysctl->{"hw.physmem"} );
         my $mem_inactive = $sysctl->{"vm.stats.vm.v_inactive_count"} * $sysctl->{"hw.pagesize"};
         my $mem_cache    = $sysctl->{"vm.stats.vm.v_cache_count"} * $sysctl->{"hw.pagesize"};
         my $mem_free     = $sysctl->{"vm.stats.vm.v_free_count"} * $sysctl->{"hw.pagesize"};
@@ -1266,7 +1309,7 @@ sub print_prefixed_php_info {
         $php_version = $prefix . 'PHP:' . $php_version;
     }
     else {
-        $php_version = 'Unknown';
+        $php_version = $prefix . 'PHP:Unknown';
     }
 
     print "$php_version\n";
@@ -1948,9 +1991,15 @@ sub print_parsed_php_info {
     if ( $src_php =~ /^(\d+)\.(\d+)/ ) {
         ( $src_php_major, $src_php_minor ) = ( $1, $2 );
     }
+    else {
+        ( $src_php_major, $src_php_minor ) = ( '0', '0' );
+    }
 
     if ( $dst_php =~ /^(\d+)\.(\d+)/ ) {
         ( $dst_php_major, $dst_php_minor ) = ( $1, $2 );
+    }
+    else {
+        ( $dst_php_major, $dst_php_minor ) = ( '0', '0' );
     }
 
     my $print_message = 0;
@@ -2987,6 +3036,13 @@ mysql username conflicts have been found. To fix, please rename the user(s) spec
     }
     else {
         print_username_change_info_ES();
+    }
+}
+
+sub check_for_missing_scp {
+    my $mysql_output = `scp 2>&1`;
+    if ( ! $mysql_output || ! $mysql_output =~ /usage:/i ) {
+        print "\n!!! WARNING !!!: 'scp' may be missing (an attempt to run 'scp' did not return 'usage:' string), which could cause remote transfers to fail!\n\n";
     }
 }
 
