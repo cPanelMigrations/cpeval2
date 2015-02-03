@@ -24,12 +24,33 @@ use strict;
 use warnings;
 use IPC::Open3;
 use IO::Socket::INET;
+use Getopt::Long;
+use POSIX qw( strftime );
 
-my $version = '1.26';
+my $version = '1.27';
+
+my %opts = (
+    'create-keys' => 0,
+    'create-user' => 0,
+    'cpticket'    => undef,
+    'cpmiguser'   => undef,
+    'cpmigkey'    => undef
+);
+
+Getopt::Long::GetOptions(
+    'create-keys'   => \$opts{'create_keys'},
+    'create-user'   => \$opts{'create_user'},
+    'cpmigticket=i' => \$opts{'cpmigticket'},
+    'cpmiguser=s'   => \$opts{'cpmiguser'},
+    'cpmigkey=s'    => \$opts{'cpmigkey'}
+);
+
+create_cpmig_user() if $opts{'create_user'};
 
 if ( @ARGV > 2 ) { 
     print "  Usage is one of the following:\n\n";
     print "[root\@host ~]# $0\n";
+    print "[root\@host ~]# $0 --create-keys\n";
     print "[root\@host ~]# $0 <infile>\n";
     print "[root\@host ~]# $0 <infile> --es\n";
     exit;
@@ -73,6 +94,15 @@ my @badusers;               # if mysql username conflicts are detected, skip any
 get_control_panel_and_set_prefix();
 check_for_empty_trueuserdomains();
 verify_mysql_connectivity();
+
+my $ticket = get_ticket();
+my $cpmiguser = 'cpmig' . $ticket;
+
+if ($opts{'create_keys'}) {
+    die "create-keys should only be run on the cPanel destination host.\n" unless $is_cpanel;
+    create_cpmig_keypair($cpmiguser, $ticket);
+    exit;
+}
 
 ## behave like the original cpeval
 if ( !$infile ) {
@@ -187,6 +217,8 @@ show_ftp_accounts();
 submit_stats_info();
 
 check_for_missing_scp();
+
+auto_create_keypair($cpmiguser, $ticket);
 
 ##########
 
@@ -3122,4 +3154,278 @@ sub submit_stats_info {
     $status = $status ? $status : 'Submission did not return any status code!  Blocked by firewall?';
     print $status . "\n";
 
+}
+
+sub get_ticket {
+    my $ticket;
+    if ( exists $ENV{HISTFILE} && $ENV{HISTFILE} =~ /ticket.(\d{7,10})$/ ) {
+        $ticket = $1;
+        print "Detected ticket number " . $ticket . "\n";
+    }
+    if ( ! $ticket || $ticket !~ /^\d{7,10}$/ ) {
+        print "Unable to auto-detect valid migration ticket number, please enter a valid ticket number (7 to 10 digits) or leave blank to skip: ";
+        chomp($ticket = <STDIN>);
+        if ( $ticket =~ /^\d{7,10}$/ ) {
+            return $ticket;
+        }
+        else {
+            print "Ticket number is not 7-10 digits.  Skipping.\n";
+            return 0;
+        }
+    }
+}
+
+sub check_for_hacked_server_touchfile {
+    my $docdir = '/usr/share/doc';
+    return if !-d $docdir;
+
+    opendir( my $fh, $docdir ) or return;
+    # .cp.jeff.2014-04-09_10.5.40.209_1234567
+    my @touchfiles = grep { /^\.cp\.([^\d]+)\.(\d{4}-\d{2}-\d{2})_([^_]+)_(\d+)$/ } readdir $fh;
+    closedir $fh;
+
+    return if scalar @touchfiles == 0;
+    return 1;
+}
+
+sub auto_create_keypair {
+    return unless $is_cpanel;
+    my ($user, $ticket) = @_;
+    return if ! $user;
+    return if ! $ticket;
+    my $privkey_file = "/root/.ssh/id_" . $user;
+    my $pubkey_file = $privkey_file . ".pub";
+    my $create_key = 0;
+    if ( ! -f $privkey_file ) {
+        $create_key = 1;
+    }
+    if ( ! -f $pubkey_file ) {
+        $create_key = 1;
+    }
+    if ( check_for_hacked_server_touchfile() ) {
+        print "Hacked server touch-file found, NOT auto-creating SSH keypair for migration.\n";
+        return;
+    } else {
+        if ( $create_key ) {
+            create_cpmig_keypair($user, $ticket);
+        } else {
+            print "Existing cpmig SSH key pair detected at " . $privkey_file ."\n";
+        }
+    }
+}
+
+sub create_cpmig_keypair {
+    my ($user, $ticket) = @_;
+    return if ! $user;
+    return if ! $ticket;
+    print "\n";
+    my $privkey_file = "/root/.ssh/id_" . $user;
+    my $pubkey_file = $privkey_file . ".pub";
+    my $create_key = 0;
+    if ( ! -f $privkey_file ) {
+        $create_key = 1;
+    }
+    if ( ! -f $pubkey_file ) {
+        $create_key = 1;
+    }
+    if ( $create_key ) {
+        print "-- Attempting to add a new SSH key pair at " . $privkey_file . "\n";
+        if ( system("ssh-keygen", "-q", "-t", "rsa", "-N", "", "-C", "cPanel migration services ticket " . $ticket, "-f", $privkey_file) >= 1 ) {
+            print "-- Failed to add SSH key pair. Consult any errors above for potential reasons for this.\n";
+            return;
+        }
+    }
+    my $pubkey;
+    if ( open my $pubkey_fh, '<', $pubkey_file ) {
+        while (<$pubkey_fh>) {
+            if (/^(ssh.*$ticket)$/) {
+                $pubkey = $1;
+            }            
+        }
+        if ( $pubkey ) {
+            print "-- SSH public key found at: " . $pubkey_file . "\n";
+            print "-- Copy/paste the entire command below on the SOURCE server to create a cpmig user and authorize the SSH key for login:\n";
+            # This used the gzipped, base64-encoded contents of createuser.pl
+            # export CPUSER="${user}" CPTICKET="${ticket}" PUBKEY="${pubkey}"; cat << END_OF_CREATEUSER | tr -d '\\\\\\n' | base64 -d | gzip -d | perl
+            print << "END_OF_COMMAND";
+#### BEGIN COPY BELOW ####
+curl -s https://cpeval.cpanel.net/cpeval2-devel | perl - --create-user --cpmiguser="${user}" --cpmigticket="${ticket}" --cpmigkey="${pubkey}"
+#### END COPY ABOVE ####
+END_OF_COMMAND
+        }
+    }
+}
+
+sub create_cpmig_user {
+    print "\n";
+
+    my $fail = 0;
+    foreach my $test ( qw( cpmigticket cpmiguser cpmigkey ) ) {
+        if ( ! exists($opts{$test}) || ( exists($opts{$test}) && ! $opts{$test} ) ) {
+            print "-- Missing " . $test . "\n";
+            $fail = 1;
+        }
+    }
+
+    die if $fail;
+
+    my $user = $opts{'cpmiguser'};
+    my $ticket = $opts{'cpmigticket'};
+    my $pubkey = $opts{'cpmigkey'};
+    my $password;
+    my $expire;
+    my @user_pwent;
+
+    if ( @user_pwent = getpwnam( $user ) ) {
+        print "-- Found existing " . $user . " account\n";
+    } else {
+        $expire = strftime "%Y-%m-%d", localtime(time + ( 86400 * 60 )); # Expire 60 days from now
+        print "-- Attempting to add account for " . $user . " which will expire on " . $expire . ":\n";
+        system("useradd", "-c", "cPanel migration services ticket " . $ticket, "-e", $expire, "-m", $user);
+        if ( @user_pwent = getpwnam( $user ) ) {
+            print "-- Success!\n";
+        } else {
+            die "Failed to add account. Consult any errors from 'useradd' above for potential reasons for this.\n";
+        }
+        print "-- Attempting to add " . $user . " to wheel group (might fail on some systems).\n";
+        system("usermod", "-G", "wheel", $user);
+        print "-- Attempting to set random password for " . $user . ":\n";
+        $password = join('', map +(0..9,'a'..'z','A'..'Z')[rand(10+26*2)], 1..16);
+        open( PASSWD, "|-" ) || exec( "passwd", "--stdin", $user ) || die "Failed to execute \"passwd --stdin " . $user . "\" to set password.\n";
+        print PASSWD $password . "\n";
+        close PASSWD;
+    }
+
+    if ( open PASSWD, "passwd -S ${user} |") {
+        my $password_set = 0;
+        while (<PASSWD>) {
+            if (/Password set/) {
+                $password_set = 1;
+                print "-- Password is set.\n";
+            }
+        }
+        close PASSWD;
+        die "Password check failed, passwd -S " . $user ." does not report \"Password set\".\n" unless $password_set;
+    } else {
+        die "Failed to execute \"passwd -S " . $user . "\" to check password status.\n";
+    }
+
+    my $homedir = $user_pwent[7];
+    die "Unable to look up homedir for " . $user . "\n" unless $homedir;
+    die "Home directory for " . $user . " does not exist\n" unless -d $homedir;
+
+    my $sshdir = $homedir . "/.ssh";
+
+    if ( ! -d $sshdir ) {
+        mkdir $sshdir, 0700;
+    }
+
+    die ".ssh directory for " . $user . " could not be created\n" unless -d $sshdir;
+
+    chown $user_pwent[2], $user_pwent[3], $sshdir;
+    chmod 0700, $sshdir;
+
+    my $authkeys_file = $sshdir . "/authorized_keys";
+    my $have_key = 0;
+
+    if ( open my $authkeys_fh, "<", $authkeys_file ) {
+        while ( <$authkeys_fh> ) {
+            if ( /^\Q$pubkey\E$/ ) {
+                $have_key = 1;
+            }
+        }
+        close $authkeys_fh;
+        if ( $have_key ) {
+            print "-- SSH key already found in " . $authkeys_file . "\n";
+            $have_key = 1;
+        }
+    }
+
+    if ( ! $have_key ) {
+        if ( open my $authkeys_fh, ">>", $authkeys_file ) {
+            print $authkeys_fh $pubkey . "\n";
+            close $authkeys_fh;
+        }
+        if ( open my $authkeys_fh, "<", $authkeys_file ) {
+            while ( <$authkeys_fh> ) {
+                if ( /\Q$pubkey\E$/ ) {
+                    $have_key = 1;
+                }
+            }
+            close $authkeys_fh;
+            if ( $have_key ) {
+                print "-- SSH key successfully added to " . $authkeys_file . "\n";
+            } else {
+                die "Failed to add SSH key to " . $authkeys_file . "\n";
+            }
+        }
+    }
+
+    chown $user_pwent[2], $user_pwent[3], $authkeys_file;
+    chmod 0600, $authkeys_file;
+
+    my $sudoers_include_file = "/etc/sudoers.d/cp_migration_" . $ticket;
+    my $sudo_entry = $user . "\tALL=(ALL)\tALL";
+    my $have_sudo = 0;
+
+    if ( open my $sudoers_fh, "<", $sudoers_include_file ) {
+        while ( <$sudoers_fh> ) {
+            if ( /^\Q$sudo_entry\E$/ ) {
+                $have_sudo = 1;
+            }
+        }
+        if ( $have_sudo ) {
+            print "-- Sudo user entry already found in " . $sudoers_include_file . "\n";
+        }
+        close $sudoers_fh;
+    }
+
+    if ( ! $have_sudo ) {
+        if ( open my $sudoers_fh, ">>", $sudoers_include_file ) {
+            print $sudoers_fh $sudo_entry . "\n";
+            close $sudoers_fh;
+        }
+        if ( open my $sudoers_fh, "<", $sudoers_include_file ) {
+            while ( <$sudoers_fh> ) {
+                if ( /^\Q$sudo_entry\E$/ ) {
+                    $have_sudo = 1;
+                }
+            }
+            close $sudoers_fh;
+            if ( $have_sudo ) {
+                print "-- Added sudo entry to " . $sudoers_include_file . "\n";
+            } else {
+                die "-- Failed to add sudo entry to " . $sudoers_include_file . "\n";
+            }
+        }
+}
+
+    my $sudoers_main_file = "/etc/sudoers";
+    my $have_include = 0;
+
+    if ( open my $sudoers_fh, "<", $sudoers_main_file ) {
+        while ( <$sudoers_fh> ) {
+            if ( m{^#includedir\s+/etc/sudoers\.d$} ) {
+                $have_include = 1;
+            }
+        }
+        if ( ! $have_include ) {
+            print "!! WARNING: \"#includedir /etc/sudoers.d\" not found in " . $sudoers_main_file . ", this means a sudo entry will need to be manually added to /etc/sudoers for ". $user . ":\n" . $sudo_entry . "\n";
+        }
+        close $sudoers_fh;
+    }
+
+    if ( $password && $expire ) {
+        print "-- Copy the following information to the Server Information box in the migration ticket:\n";
+        print "#### BEGIN COPY BELOW ####\n";
+        print "Migration User Name: " . $user . "\n";
+        print "Migration User Password: " . $password . "\n";
+        print "Migration User Expiration: " . $expire . "\n";
+        print "Migration Ticket Number: " . $ticket . "\n";
+        print "#### END COPY ABOVE ####\n";
+    } else {
+        print "-- A new user was not created this time, so there is no password info to give.\n";
+    }
+
+exit 0;
 }
