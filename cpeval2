@@ -27,7 +27,7 @@ use IO::Socket::INET;
 use Getopt::Long;
 use POSIX qw( strftime );
 
-my $version = '1.27';
+my $version = '1.28';
 
 my %opts = (
     'create-keys' => 0,
@@ -3172,6 +3172,8 @@ sub get_ticket {
             print "Ticket number is not 7-10 digits.  Skipping.\n";
             return 0;
         }
+    } else {
+        return $ticket;
     }
 }
 
@@ -3238,10 +3240,11 @@ sub create_cpmig_keypair {
     my $pubkey;
     if ( open my $pubkey_fh, '<', $pubkey_file ) {
         while (<$pubkey_fh>) {
-            if (/^(ssh.*$ticket)$/) {
+            if (/^(ssh.*${ticket})$/) {
                 $pubkey = $1;
             }            
         }
+        close $pubkey_fh;
         if ( $pubkey ) {
             print "-- SSH public key found at: " . $pubkey_file . "\n";
             print "-- Copy/paste the entire command below on the SOURCE server to create a cpmig user and authorize the SSH key for login:\n";
@@ -3249,10 +3252,17 @@ sub create_cpmig_keypair {
             # export CPUSER="${user}" CPTICKET="${ticket}" PUBKEY="${pubkey}"; cat << END_OF_CREATEUSER | tr -d '\\\\\\n' | base64 -d | gzip -d | perl
             print << "END_OF_COMMAND";
 #### BEGIN COPY BELOW ####
-curl -s https://cpeval.cpanel.net/cpeval2-devel | perl - --create-user --cpmiguser="${user}" --cpmigticket="${ticket}" --cpmigkey="${pubkey}"
+curl -s https://cpeval.cpanel.net/cpeval2 | perl - --create-user --cpmiguser="${user}" --cpmigticket="${ticket}" --cpmigkey="${pubkey}"
 #### END COPY ABOVE ####
 END_OF_COMMAND
         }
+        else {
+            print "-- SSH public key found at " . $pubkey_file . " but it does not appear to contain the ticket key I am looking for.  Check the contents, remove both ticket key files if necessary, and run this again.\n";
+            return;
+        }
+    } else {
+            print "-- Unable to open " . $pubkey_file . "\n";
+            return;
     }
 }
 
