@@ -27,7 +27,7 @@ use IO::Socket::INET;
 use Getopt::Long;
 use POSIX qw( strftime );
 
-my $version = '1.28';
+my $version = '1.29';
 
 my %opts = (
     'create-keys' => 0,
@@ -3301,21 +3301,21 @@ sub create_cpmig_user {
         system("usermod", "-G", "wheel", $user);
         print "-- Attempting to set random password for " . $user . ":\n";
         $password = join('', map +(0..9,'a'..'z','A'..'Z')[rand(10+26*2)], 1..16);
-        open( PASSWD, "|-" ) || exec( "passwd", "--stdin", $user ) || die "Failed to execute \"passwd --stdin " . $user . "\" to set password.\n";
-        print PASSWD $password . "\n";
+        open( PASSWD, "|-" ) || exec( "chpasswd" ) || die "Failed to execute chpasswd to set password.\n";
+        print PASSWD $user . ':' . $password . "\n";
         close PASSWD;
     }
 
     if ( open PASSWD, "passwd -S ${user} |") {
         my $password_set = 0;
         while (<PASSWD>) {
-            if (/Password set/) {
+            if ( m{ \A ${user} \s P.? \s }x ) {
                 $password_set = 1;
                 print "-- Password is set.\n";
             }
         }
         close PASSWD;
-        die "Password check failed, passwd -S " . $user ." does not report \"Password set\".\n" unless $password_set;
+        die "Password check failed, \"passwd -S " . $user ."\" does not report that password is set.\n" unless $password_set;
     } else {
         die "Failed to execute \"passwd -S " . $user . "\" to check password status.\n";
     }
