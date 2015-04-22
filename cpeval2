@@ -26,8 +26,10 @@ use IPC::Open3;
 use IO::Socket::INET;
 use Getopt::Long;
 use POSIX qw( strftime );
+use Term::ANSIColor qw(:constants);
+$Term::ANSIColor::AUTORESET = 1;
 
-my $version = '1.29';
+my $version = '1.30';
 
 my %opts = (
     'create-keys' => 0,
@@ -218,7 +220,7 @@ submit_stats_info();
 
 check_for_missing_scp();
 
-auto_create_keypair($cpmiguser, $ticket);
+auto_create_keypair($cpmiguser, $ticket) unless $infile;
 
 ##########
 
@@ -439,7 +441,7 @@ sub verify_mysql_connectivity {
             if ( $is_plesk == 1 or $is_plesk_smb10 == 1 ) {
                 if ( -e '/etc/psa/.psa.shadow' ) {
                     open my $psa_fh, '<', '/etc/psa/.psa.shadow' or die "$!\n";
-                    my $mysql_password = readline( $psa_fh );
+                    chomp(my $mysql_password = readline( $psa_fh ));
                     close $psa_fh;
 
                     if ( !$mysql_password ) {
@@ -447,7 +449,7 @@ sub verify_mysql_connectivity {
                     }
                     else {
                         open my $mycnf_fh, '>', '/root/.my.cnf' or die "$!\n";
-                        print $mycnf_fh "[client]\nuser=admin\npassword=$mysql_password";
+                        print $mycnf_fh "[client]\nuser=admin\npassword=\"" . $mysql_password . "\"\n";
                         close $mycnf_fh;
                     }
                 }
@@ -462,7 +464,7 @@ sub verify_mysql_connectivity {
                     my $mysql_password;
                     while ( <$mysqlconf_fh> ) {
                         if ( m{ \A passwd=(.*) \z }xms ) {
-                            $mysql_password = $1;
+                            chomp($mysql_password = $1);
                         }
                     }
                     close $mysqlconf_fh;
@@ -472,7 +474,7 @@ sub verify_mysql_connectivity {
                     }
                     else {
                         open my $mycnf_fh, '>', '/root/.my.cnf' or die "$!\n";
-                        print $mycnf_fh "[client]\nuser=da_admin\npassword=$mysql_password";
+                        print $mycnf_fh "[client]\nuser=da_admin\npassword=\"" . $mysql_password . "\"\n";
                         close $mycnf_fh;
                     }
                 }
@@ -487,7 +489,7 @@ sub verify_mysql_connectivity {
                 }
                 else {
                     open my $mycnf_fh, '>', '/root/.my.cnf' or die "$!\n";
-                    print $mycnf_fh "[client]\nuser=root\npassword=$mysql_password";
+                    print $mycnf_fh "[client]\nuser=root\npassword=\"" . $mysql_password . "\"\n";
                     close $mycnf_fh;
                 }
             }
@@ -501,8 +503,8 @@ sub verify_mysql_connectivity {
             # After creating /root/.my.cnf, see if we can connect to MySQL now. If not, remove our /root/.my.cnf and exit
             my $final_check = mysql_test();
             if ( $final_check =~ /ERROR/ ) {
-                unlink '/root/.my.cnf' or die "Could not remove our custom /root/.my.cnf\n";
-                die "Still unable to connect to MySQL, even after creating /root/.my.cnf . Removed our custom /root/.my.cnf and exiting\n";
+                #unlink '/root/.my.cnf' or die "Could not remove our custom /root/.my.cnf\n";
+                die "Still unable to connect to MySQL, even after creating /root/.my.cnf . Check contents of our custom /root/.my.cnf\n";
             }
             else {
                 print "We can now connect to MySQL, proceeding.\n";
@@ -1234,11 +1236,12 @@ sub print_custom_php_modules {
     push @base, @ignore;
 
     my $phpm = `php -m 2> /dev/null`;
-    $phpm =~ /^\[PHP Modules\]\s([^\[]+)[\s]?$/m;
-    my @mods = split( "\n", $1 );
-    foreach (@mods) {
-        my $mod = $_;
-        push( @custom, " " . $mod . "\n" ) unless grep ( /^$mod$/, @base );
+    if ( $phpm =~ /^\[PHP Modules\]\s([^\[]+)[\s]?$/m ) {
+        my @mods = split( "\n", $1 );
+        foreach (@mods) {
+            my $mod = $_;
+            push( @custom, " " . $mod . "\n" ) unless grep ( /^$mod$/, @base );
+        }
     }
 
     if (@custom) {
@@ -1274,7 +1277,7 @@ sub print_duplicate_usernames { # And non-unique first 8 characters as required 
             if ( m/[^:]+: ([^^\s]+)(?:\^|\s*|$)/ ) {
                 $user{$1}{$_} = 1;
                 my $first8 = substr( $1, 0, 8 );
-                next if $1 eq $first8;
+                next if length($1) < 8;
                 $user{$first8 . " (first 8)"}{$_} = 1;
             }
         }
@@ -3143,17 +3146,16 @@ sub submit_stats_info {
             last;
         }
         if ( m{^HTTP/[^ ]+ (400.*)$} ) {
-            $status = 'WARNING: Submission attempt failed (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
+            $status = BOLD RED ON_BLACK 'WARNING: Submission attempt failed (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
             last;
         }
         if ( m{^HTTP/[^ ]+ (.*)$} ) {
-            $status = 'Submission returned unknown status (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
+            $status = BOLD RED ON_BLACK 'WARNING: Submission returned unknown status (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
             last;
         }
     }
-    $status = $status ? $status : 'Submission did not return any status code!  Blocked by firewall?';
-    print $status . "\n";
-
+    $status = $status ? $status : BOLD RED ON_BLACK 'WARNING: Submission did not return any status code!  Blocked by firewall?  Is our server down?!  We want these stats!';
+    print $status. "\n";
 }
 
 sub get_ticket {
