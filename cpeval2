@@ -272,12 +272,7 @@ sub print_news_plesk {
 }
 
 sub print_news_ensim {
-    print q{   !! ENSIM BLOCKERS !!
-
-Case 107517: Check to see if this case is resolved and published to _DEVEL or _PUBLIC, if not, you may not be able to use Transfer Tool or cpmig.sh and must perform a manual migration.
-    };
-
-    sleep 3;
+     # No current blockers listed.  Last removed was Case 107517.
 }
 
 sub print_news_da {
