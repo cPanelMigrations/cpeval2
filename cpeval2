@@ -205,8 +205,8 @@ if ( !$opts->{'inputfile'} ) {
     print_custom_php_modules();
     print_htype_fwd();
     print_htype_none();
-    print_plesk_duplicate_email_users(); # case 75913 - [Plesk] Copy email accounts with uppercase chars as all lowercase if a matching account does not already exist
-    print_reseller_username_conflicts(); # case 76677 - [Plesk] If a reseller has a domain, copy it instead of making a "psa-reseller-$cpuser.invalid" domain
+    print_plesk_duplicate_email_users();
+    print_reseller_username_conflicts();
 
     print '-' x 40 . "\n";
 
@@ -1761,6 +1761,8 @@ sub print_prefixed_mysql_old_style_passwords_info {
 }
 
 sub print_plesk_duplicate_email_users {
+    # Plesk allowed creation of duplicate mixed-case email addresses, this reports those.
+    # Prior to case FB-75913 mixed-case addresses were skipped entirely, but now we will copy a mixed-case address as all-lowercase if one doesn't already exist
     return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
 
     my $maildir = '/var/qmail/mailnames';
@@ -1820,6 +1822,8 @@ sub print_plesk_duplicate_email_users {
 }
 
 sub print_reseller_username_conflicts {
+    # Case FB-76677 - [Plesk] If a reseller has a domain, copy it instead of making a "psa-reseller-$cpuser.invalid" domain
+    # This was addressed by adding --reseller and --no-reseller options to pkgacct-pXa, so we still need to know which reseller usernames conflict with system usernames so they can be handled appropriately.
     return unless ( $is_plesk == 1 or $is_plesk_smb10 == 1 );
     my @plesk_resellers;
 
