@@ -222,7 +222,7 @@ if ( !$opts->{'inputfile'} ) {
     print_prefixed_user_config_problems();
     print_prefixed_php_information();
     print_prefixed_cpanel_eula_accepted_check();
-    print_mysql_username_conflict_info();
+    print_prefixed_mysql_username_conflict_info();
     print_prefixed_mysql_openfileslimit();
     print_prefixed_mysql_skip_networking();
     print_prefixed_mysql_old_style_passwords_info();
@@ -1657,7 +1657,7 @@ sub print_prefixed_cpanel_eula_accepted_check {
     }
 }
 
-sub print_mysql_username_conflict_info {
+sub print_prefixed_mysql_username_conflict_info {
     return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
 
     my ( $user, $domain );
