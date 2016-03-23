@@ -221,7 +221,7 @@ if ( !$opts->{'inputfile'} ) {
     print_prefixed_reseller_username_conflicts();
     print_prefixed_user_config_problems();
     print_prefixed_php_information();
-    cpanel_eula_accepted_check();
+    print_prefixed_cpanel_eula_accepted_check();
     print_mysql_username_conflict_info();
     print_prefixed_mysql_openfileslimit();
     print_prefixed_mysql_skip_networking();
@@ -1637,7 +1637,7 @@ sub print_prefixed_php_information {
 
 }
 
-sub cpanel_eula_accepted_check {
+sub print_prefixed_cpanel_eula_accepted_check {
     return if ( $is_cpanel != 1 );
 
     my $eula_accepted = 0;
