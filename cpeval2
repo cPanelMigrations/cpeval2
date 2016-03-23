@@ -3417,7 +3417,7 @@ sub create_cpmig_user {
     if ( open PASSWD, "passwd -S ${user} |") {
         my $password_set = 0;
         while (<PASSWD>) {
-            if ( m{ \A ${user} \s P.? \s }x ) {
+            if ( m{ \A ${user} \s P.? \s }x || m{ \A Password \s set }x ) {
                 $password_set = 1;
                 print "-- Password is set.\n";
             }
