@@ -287,8 +287,6 @@ unless ( $opts->{'inputfile'} ) {
 }
 
 
-show_ftp_accounts();
-
 submit_stats_info();
 
 check_for_missing_scp();
@@ -3109,40 +3107,6 @@ determined by logging into WHM on the cluster server and checking it there):
         }
     }
 }
-
-sub show_ftp_accounts {
-    return if ( $is_plesk == 0 and $is_plesk_smb10 == 0 );
-    return if ( $plesk_major_version < 10 );
-
-    my $ftp_accounts = sqlcmd( 'use psa; SELECT login,home FROM sys_users WHERE mapped_to IS NOT NULL' );
-    my @ftp_accounts = split /\n/, $ftp_accounts;
-
-    my %ftp_accounts = ();
-
-    for my $ftp_account (@ftp_accounts) {
-        if ( $ftp_account =~ /(.*)\s+(.*)/ ) {
-            my ( $ftp_user, $ftp_docroot ) = ( $1, $2 );
-            $ftp_accounts{$ftp_docroot} .= "[$ftp_user] ";
-        }
-    }
-
-    if (%ftp_accounts) {
-        print_header( 'FTP DOCROOT -> FTP USER' );
-        print q{
-[ Case 83521 ]
-The Plesk migrations scripts do not currently copy all FTP accounts. Below is a list of each FTP account
-that would not be copied. Things to keep in mind are:
-
-1) Plesk uses /var/www/vhosts/$DOMAIN/ to store website data, and cPanel uses /home/$USER/public_html/
-2) Website data for subdomains will be at /home/$USER/subdomains/$DOMAIN/
-
-};
-        for my $key ( sort keys %ftp_accounts ) {
-            print "$key\t-> $ftp_accounts{$key}\n";
-        }
-    }
-}
-
 
 sub print_parsed_mysql_username_conflicts {
     my @mysql_username_conflicts = @_;
