@@ -3234,15 +3234,15 @@ sub submit_stats_info {
             last;
         }
         if (m{^HTTP/[^ ]+ (400.*)$}) {
-            $status = BOLD RED ON_BLACK 'WARNING: Submission attempt failed (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
+            $status = BOLD RED ON_BLACK 'WARNING: Submission attempt failed (' . $1 . '). Please contact miglead@cpanel.net with this ticket ID and paste the stats info found above into the ticket notes.';
             last;
         }
         if (m{^HTTP/[^ ]+ (.*)$}) {
-            $status = BOLD RED ON_BLACK 'WARNING: Submission returned unknown status (' . $1 . '). Please contact ssp-requests@cpanel.net with this ticket ID and paste this stats submission output into the notes.';
+            $status = BOLD RED ON_BLACK 'WARNING: Submission returned unknown status (' . $1 . '). Please contact miglead@cpanel.net with this ticket ID and paste the stats info found above into the ticket notes.';
             last;
         }
     }
-    $status = $status ? $status : BOLD RED ON_BLACK 'WARNING: Submission did not return any status code!  Blocked by firewall?  Is our server down?!  We want these stats!';
+    $status = $status ? $status : BOLD RED ON_BLACK 'WARNING: Submission did not return any status code!  Blocked by firewall?  Is our server down?!  We want these stats!  Please contact miglead@cpanel.net with this ticket ID and paste the stats info found above into the ticket notes.';
     print $status. "\n";
 }
 
