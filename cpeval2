@@ -154,6 +154,8 @@ my $src_panel_version;      # e.g. "Plesk 12.0.18"
 my $dst_panel_version;      # e.g. "cPanel 11.44.0.18"
 
 my $cpanel_version;         # e.g. "11.44.0.18"
+my $os_dist;                # e.g. "CentOS"
+my $os_version;             # e.g. "7.2"
 
 my ( @hosting_type_forward, @hosting_type_nohosting );
 my @plesk_reseller_username_conflicts;
@@ -208,6 +210,7 @@ if ( !$opts->{'inputfile'} ) {
     print '-' x 40 . "\n";
 
     print_prefixed_panel_info();
+    print_prefixed_os_info();
     print_prefixed_php_info();
     print_prefixed_mysql_info();
     print_prefixed_bad_username_info();    # this sub MUST come before print_mysql_username_conflict_info();
@@ -730,6 +733,12 @@ sub print_os_info {
 
         for my $release_file (@release_files) {
             if ( -e '/etc/' . $release_file ) {
+                if ( open my $rel_fh, '<', '/etc/' . $release_file ) {
+                    while (<$rel_fh>) {
+                        if    (/(\d+\.\d+)/) { $os_version = $1; last; }
+                        elsif (/(\d+)/)      { $os_version = $1; last; }
+                    }
+                }
                 $release_file =~ s/release//g;
                 $release_file =~ s/version//g;
                 $release_file =~ s/[-_]//g;
@@ -737,8 +746,9 @@ sub print_os_info {
                 if ( $release_file eq 'redhat' ) {
                     $release_file = 'Redhat/CentOS';
                 }
-                $os .= " ($release_file)";
-
+                $os_dist = $release_file;    # global
+                $os .= " (" . $release_file;
+                $os .= defined($os_version) ? " ${os_version})" : ")";
                 last;
             }
         }
@@ -1444,6 +1454,11 @@ sub print_prefixed_panel_info {
     }
 }
 
+sub print_prefixed_os_info {
+    print $prefix . 'OS_DIST:' . $os_dist . "\n"       if defined($os_dist);
+    print $prefix . 'OS_VERSION:' . $os_version . "\n" if defined($os_version);
+}
+
 sub print_prefixed_php_info {
     my $php_version = `php -v 2>/dev/null`;
 
@@ -1856,9 +1871,11 @@ sub parse_output_file {
         die "$file does not exist, or is not a regular file\n";
     }
 
-    my ( $has_src,   $has_dst );
-    my ( $src_php,   $dst_php );
-    my ( $src_mysql, $dst_mysql );
+    my ( $has_src,     $has_dst );
+    my ( $src_os_dist, $dst_os_dist );
+    my ( $src_os_ver,  $dst_os_ver );
+    my ( $src_php,     $dst_php );
+    my ( $src_mysql,   $dst_mysql );
     my %badusers      = ();
     my %baduserconfig = ();
     my ( $src_dedicated_ipaddrs_used, $dst_ipaddrs_free );
@@ -1910,6 +1927,20 @@ sub parse_output_file {
         }
         elsif (m{ \A d:VERSION:(.*) }xms) {
             $dst_panel_version = $1;
+        }
+
+        ## OS checks
+        if (m{ \A $panel_regex:OS_DIST:(.*) }xms) {
+            $src_os_dist = $1;
+        }
+        elsif (m{ \A d:OS_DIST:(.*) }xms) {
+            $dst_os_dist = $1;
+        }
+        if (m{ \A $panel_regex:OS_VERSION:(.*) }xms) {
+            $src_os_ver = $1;
+        }
+        elsif (m{ \A d:OS_VERSION:(.*) }xms) {
+            $dst_os_ver = $1;
         }
 
         ## PHP checks
@@ -2069,6 +2100,7 @@ sub parse_output_file {
     }
 
     print_parsed_panel_info();
+    print_parsed_os_info($dst_os_ver);
     print_parsed_eula_info($eula_accepted);
     print_parsed_php_info( $src_php, $dst_php );
     print_parsed_mysql_info( $src_mysql, $dst_mysql );
@@ -2102,6 +2134,22 @@ sub print_parsed_panel_info {
     else {    #ES
         print "Origen: " . $src_panel_version . "\n";
         print "Destino: " . $dst_panel_version . "\n";
+    }
+}
+
+sub print_parsed_os_info {
+    my ($dst_os_ver) = @_;
+    if ( defined($dst_os_ver) && version_compare( $dst_os_ver, qw( < 6 ) ) ) {
+        if ( $opts->{'es'} == 0 ) {
+            print_header('Operating System Version');
+            print q{The operating system version on the destination server is not at least major version 6.  Due to various limitations in older operating systems such as the lack of SNI and TLS 1.1/1.2 support we highly recommend that CentOS/RedHat/CloudLinux 6 or 7 is used.
+};
+        }
+        else {    #ES
+            print_header('Versión del sistema operativo');
+            print q{La versión del sistema operativo en el servidor de destino no es la version minima de 6. Este sistema operativo tiene varias limitaciones tal como la falta de soporte de SNI y TLS 1.1/1.2 debido a esto recomendamos que utilicen CentOS/RedHat/CloudLinux 6 o 7.
+};
+        }
     }
 }
 
