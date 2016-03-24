@@ -513,8 +513,11 @@ sub verify_mysql_connectivity {
             print "Could not connect to MySQL (query failed: mysql -e 'select 1').\n";
             print "/root/.my.cnf already exists. Inspect it manually.\n";
 
-            if ( $is_plesk == 1 or $is_plesk_smb10 == 1 ) {
-                print "Hint: try the password from /etc/psa/.psa.shadow and user 'admin'.\n";
+            if ( $is_plesk == 1 && version_compare( $plesk_major_version . "." . $plesk_minor_version, '>=', '10.2' ) ) {
+                print "Hint: try user 'admin' and the password from /usr/local/psa/bin/admin --show-password OR the contents of /etc/psa/.psa.shadow.\n";
+            }
+            elsif ( $is_plesk == 1 or $is_plesk_smb10 == 1 ) {
+                print "Hint: try user 'admin' and the contents of /etc/psa/.psa.shadow.\n";
             }
             elsif ( $is_da == 1 ) {
                 print "Hint: try the credentials from /usr/local/directadmin/conf/mysql.conf .\n";
