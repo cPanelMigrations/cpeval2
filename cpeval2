@@ -780,20 +780,15 @@ sub print_perl_info {
 
 sub print_mysql_info {
     my $mysql_version = `mysql --version`;
-    $mysql_version =~ /Ver [0-9]{1,2}\.[0-9]{1,2} Distrib ([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}[a-z]?), for/;
+    $mysql_version =~ /Ver [0-9]{1,2}\.[0-9]{1,2} Distrib ([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}[a-z]?)/;
     $mysql_version = $1 ? $1 : 'Unknown';
 
     if ( $mysql_version ne 'Unknown' ) {
-        my $mysql_version_tmp = $mysql_version;
-        $mysql_version_tmp =~ s/\.//g;
-        $mysql_version_tmp = substr $mysql_version_tmp, 0, 2;
-
-        if ( $mysql_version_tmp < 41 ) {
+        if ( version_compare( $mysql_version, qw( < 4.1 ) ) ) {
             $mysql_version .= " :UNSUPPORTED\n";
         }
     }
 
-    #    print 'MySQL: ' . "$mysql_version\n";
     print_format( 'MySQL', $mysql_version );
 }
 
@@ -1465,15 +1460,11 @@ sub print_prefixed_php_info {
 
 sub print_prefixed_mysql_info {
     my $mysql_version = `mysql --version`;
-    $mysql_version =~ /Ver [0-9]{1,2}\.[0-9]{1,2} Distrib ([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}[a-z]?), for/;
+    $mysql_version =~ /Ver [0-9]{1,2}\.[0-9]{1,2} Distrib ([0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}[a-z]?)/;
     $mysql_version = $1 ? $1 : 'Unknown';
 
     if ( $mysql_version ne 'Unknown' ) {
-        my $mysql_version_tmp = $mysql_version;
-        $mysql_version_tmp =~ s/\.//g;
-        $mysql_version_tmp = substr $mysql_version_tmp, 0, 2;
-
-        if ( $mysql_version_tmp < 41 ) {
+        if ( version_compare( $mysql_version, qw( < 4.1 ) ) ) {
             print $prefix . 'MYSQL:' . $mysql_version . ":UNSUPPORTED\n";
         }
         else {
