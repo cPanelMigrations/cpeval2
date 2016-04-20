@@ -127,7 +127,7 @@ use POSIX qw( strftime );
 use Term::ANSIColor qw(:constants);
 $Term::ANSIColor::AUTORESET = 1;
 
-my $version = '1.32';
+my $version = '1.33';
 
 my $opts = opts_get();
 
@@ -295,16 +295,19 @@ auto_create_keypair( $cpmiguser, $ticket ) unless $opts->{'inputfile'};
 ##########
 
 sub version_cmp {    # should only be used by version_compare()
-    my ( $parent1, $major1, $minor1, $build1 ) = split /[\._]/, $_[0];
-    my ( $parent2, $major2, $minor2, $build2 ) = split /[\._]/, $_[1];
-    return $parent1 <=> $parent2 || $major1 <=> $major2 || $minor1 <=> $minor2 || $build1 <=> $build2;
+    no warnings 'uninitialized';    # Prevent uninitialized value warnings when not using all 4 values
+    my ( $a1, $b1, $c1, $d1 ) = split /[\._]/, $_[0];
+    my ( $a2, $b2, $c2, $d2 ) = split /[\._]/, $_[1];
+    return $a1 <=> $a2 || $b1 <=> $b2 || $c1 <=> $c2 || $d1 <=> $d2;
 }
 
 sub version_compare {
 
     # example: return if version_compare($ver_string, qw( >= 1.2.3.3 ));
-    # Must be a four-digit version separated by periods.
+    # Must be no more than four version numbers separated by periods and/or underscores.
     my ( $ver1, $mode, $ver2 ) = @_;
+    return if ( !defined($ver1) || ( $ver1 =~ /[^\._0-9]/ ) );
+    return if ( !defined($ver2) || ( $ver2 =~ /[^\._0-9]/ ) );
 
     # Shamelessly copied the comparison logic out of Cpanel::Version::Compare
     my %modes = (
